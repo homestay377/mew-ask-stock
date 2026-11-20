@@ -8,6 +8,7 @@
 /// 交互形式保持不变：收起态是一行胶囊，点击展开；展开后可再点收起。
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -183,13 +184,15 @@ class _StockChartPanelState extends State<StockChartPanel> {
     });
 
     // 行情卡与主数据并行取，互不阻塞。
-    _src
-        .quote(widget.state.symbol)
-        .then((q) {
-          if (!mounted || _lastKey != key) return;
-          setState(() => _quote = q);
-        })
-        .catchError((Object _) {});
+    unawaited(
+      _src
+          .quote(widget.state.symbol)
+          .then((q) {
+            if (!mounted || _lastKey != key) return;
+            setState(() => _quote = q);
+          })
+          .catchError((Object _) {}),
+    );
 
     try {
       if (_isMinute) {
