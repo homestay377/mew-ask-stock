@@ -99,8 +99,8 @@ void main() {
     for (final n in [270, 300, 400, 640]) {
       boxesAt[n] = Chanlun.analyze(bars.sublist(bars.length - n), formula).boxes.length;
     }
-    expect(boxesAt[270], lessThan(boxesAt[640]), reason: '270 根应明显少于全量的中枢数');
-    expect(boxesAt[400], boxesAt[640], reason: '400 根起结果已收敛，与全量一致');
+    expect(boxesAt[270], lessThan(boxesAt[640]!), reason: '270 根应明显少于全量的中枢数');
+    expect(boxesAt[400], boxesAt[640]!, reason: '400 根起结果已收敛，与全量一致');
   });
 
   test('viewStart 只裁剪显示范围，不改变计算结果', () {
