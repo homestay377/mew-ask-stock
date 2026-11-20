@@ -46,7 +46,7 @@ class ChartViewport extends ChangeNotifier {
   }
 
   void zoom(double factor) {
-    final nv = (visible * factor).round().clamp(minVisible, math.max(minVisible, total));
+    final nv = (visible * factor).round().clamp(minVisible, math.max(minVisible, total)).toInt();
     if (nv == visible) return;
     // 以右端为锚点缩放：看盘时更符合直觉（最新价不动）
     final rightEdge = start + visible;
@@ -56,7 +56,7 @@ class ChartViewport extends ChangeNotifier {
   }
 
   void pan(int deltaBars) {
-    final ns = (start + deltaBars).clamp(0, math.max(0, total - visible));
+    final ns = (start + deltaBars).clamp(0, math.max(0, total - visible)).toInt();
     if (ns == start) return;
     start = ns;
     notifyListeners();
@@ -112,14 +112,12 @@ class ChartGestureLayer extends StatefulWidget {
 class _ChartGestureLayerState extends State<ChartGestureLayer> {
   Offset? _downPos;
   Offset? _lastPos;
+
+  /// 当前按在屏上的指针数。PointerMoveEvent 没有 pointerCount，只能自己数。
+  final Set<int> _pointers = <int>{};
   bool _dragging = false;
   bool _longPressed = false;
   bool _lockAxis = false;
-
-  /// 双指缩放基准。
-  double _pinchStartDist = 0;
-  int _pinchStartVisible = 0;
-  double _startX = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -128,7 +126,10 @@ class _ChartGestureLayerState extends State<ChartGestureLayer> {
       onPointerDown: _onDown,
       onPointerMove: _onMove,
       onPointerUp: _onUp,
-      onPointerCancel: (_) => _reset(),
+      onPointerCancel: (e) {
+        _pointers.remove(e.pointer);
+        _reset();
+      },
       child: widget.child,
     );
   }
@@ -139,16 +140,15 @@ class _ChartGestureLayerState extends State<ChartGestureLayer> {
     _dragging = false;
     _longPressed = false;
     _lockAxis = false;
-    _pinchStartDist = 0;
   }
 
   void _onDown(PointerDownEvent e) {
+    _pointers.add(e.pointer);
     _downPos = e.localPosition;
     _lastPos = e.localPosition;
     _dragging = false;
     _longPressed = false;
     _lockAxis = false;
-    _startX = e.localPosition.dx;
 
     // 长按计时
     Future.delayed(const Duration(milliseconds: ChartViewport.longPressMs), () {
@@ -181,7 +181,7 @@ class _ChartGestureLayerState extends State<ChartGestureLayer> {
     if (!_dragging) return;
 
     final vp = widget.viewport;
-    if (e.pointerCount >= 2) {
+    if (_pointers.length >= 2) {
       // 双指缩放
       final zoomFactor = math.exp(-dx / 60.0);
       vp.zoom(1 / zoomFactor);
@@ -198,6 +198,7 @@ class _ChartGestureLayerState extends State<ChartGestureLayer> {
   }
 
   void _onUp(PointerUpEvent e) {
+    _pointers.remove(e.pointer);
     final wasLong = _longPressed;
     final wasDrag = _dragging;
     final down = _downPos;

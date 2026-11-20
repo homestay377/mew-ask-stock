@@ -301,9 +301,10 @@ class _StockChartPanelState extends State<StockChartPanel> {
     final b = _focusBar;
     final s = _series;
     if (b == null || s == null) return;
-    final periodName = _periodLabels[widget.state.period] ?? widget.state.period;
+    final label = _periodLabels[widget.state.period] ?? widget.state.period;
+    // ★ 汉字紧跟标识符会被当成变量名的一部分（$labelK线 → 变量 labelK线），必须断开。
     final text =
-        '请解读 ${s.name}(${s.symbol}) 在 ${b.t} 这根$periodNameK线：'
+        '请解读 ${s.name}(${s.symbol}) 在 ${b.t} 这根 ${label}K线：'
         '开 ${b.o.toStringAsFixed(2)}，高 ${b.h.toStringAsFixed(2)}，'
         '低 ${b.l.toStringAsFixed(2)}，收 ${b.c.toStringAsFixed(2)}，'
         '量 ${b.v.toStringAsFixed(0)}。'
