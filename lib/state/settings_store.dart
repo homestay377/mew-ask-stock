@@ -16,6 +16,7 @@ import '../data/provider_branding.dart';
 import '../data/models_misc.dart';
 import '../data/proxy_config.dart';
 import '../data/settings.dart';
+import '../data/stock_defaults.dart';
 
 /// Holds [AppSettings] and persists them.
 ///
@@ -52,9 +53,54 @@ class SettingsStore extends ChangeNotifier {
       if (raw != null) secrets = asMap(jsonDecode(raw));
     } catch (_) {}
     final s = _injectSecrets(AppSettings.fromJson(json), secrets);
-    final store = SettingsStore._(s);
+    final store = SettingsStore._(await _ensureBuiltinStockKnowledge(s));
     store._applyRuntime();
     return store;
+  }
+
+  /// 补齐内置的缠论世界书与股票模式。
+  ///
+  /// **只补一次**：用一个标记文件记录「已经装过」。否则用户手动删掉之后，
+  /// 下次启动又会被加回来，等于删不掉。
+  static Future<AppSettings> _ensureBuiltinStockKnowledge(AppSettings s) async {
+    final flag = File('${AppPaths.support.path}/.stock_knowledge_seeded');
+    if (await flag.exists()) return s;
+
+    try {
+      if (await flag.parent.exists()) {
+        await flag.writeAsString('1', flush: true);
+      }
+    } catch (_) {
+      // 标记写不进去就退化成「每次都补」，不影响使用
+    }
+
+    final existingBooks = {for (final b in s.lorebooks) b.id};
+    final existingModes = {for (final m in s.modes) m.id};
+
+    final newBooks = [
+      for (final b in defaultStockLorebooks())
+        if (!existingBooks.contains(b.id)) b,
+    ];
+    final newModes = [
+      for (final m in defaultStockModes())
+        if (!existingModes.contains(m.id)) m,
+    ];
+    if (newBooks.isEmpty && newModes.isEmpty) return s;
+
+    final books = [...s.lorebooks, ...newBooks];
+
+    // 世界书是「按助手挂载」的（assistant.lorebookIds）。开股票工具的助手自动挂上，
+    // 否则新建了世界书却没人引用，等于没写。
+    final bookIds = {for (final b in newBooks) b.id};
+    final assistants = [
+      for (final a in s.assistants)
+        if (a.enableStockTools && a.lorebookIds.intersection(bookIds).isEmpty)
+          a.copyWith(lorebookIds: {...a.lorebookIds, ...bookIds})
+        else
+          a,
+    ];
+
+    return s.copyWith(lorebooks: books, modes: [...s.modes, ...newModes], assistants: assistants);
   }
 
   void update(AppSettings Function(AppSettings s) fn) {

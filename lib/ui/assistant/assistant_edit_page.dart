@@ -462,7 +462,20 @@ class _AssistantEditPageState extends State<AssistantEditPage> with SingleTicker
               title: Text(t('股票分析', 'Stock analysis')),
               subtitle: Text(t('K 线、缠论、实时行情、多级别对照', 'K-lines, Chan theory, quotes, multi-timeframe')),
               value: _a.enableStockTools,
-              onChanged: (v) => _save(_a.copyWith(enableStockTools: v)),
+              onChanged: (v) {
+                // 打开股票分析时顺手挂上内置缠论世界书，否则术语口径不会注入。
+                var next = _a.copyWith(enableStockTools: v);
+                if (v) {
+                  final stockBooks = {
+                    for (final b in _store.value.lorebooks)
+                      if (b.id.startsWith('00000000-0000-4000-8000-0000000000b')) b.id,
+                  };
+                  if (stockBooks.isNotEmpty) {
+                    next = next.copyWith(lorebookIds: {...next.lorebookIds, ...stockBooks});
+                  }
+                }
+                _save(next);
+              },
             ),
             SwitchListTile(
               secondary: const IconBadge(Icons.bookmark_added_outlined),
