@@ -91,13 +91,16 @@ void main() {
     }
   });
 
-  test('窗口太短会多造中枢（记录已知行为，防止误改取数长度）', () {
-    // 只喂 270 根 → 出现伪框；这是取数必须 >= 640 根的原因
-    final short = bars.sublist(bars.length - 270);
-    final r = Chanlun.analyze(short, formula);
-    final full = Chanlun.analyze(bars, formula);
-    expect(full.boxes.length, 4);
-    expect(r.boxes.length, greaterThan(full.boxes.length), reason: '窗口变短反而更少中枢，说明取数长度的结论需要复核');
+  test('窗口缩短会丢中枢，400 根以上才收敛（实测记录，防止误改取数长度）', () {
+    // 实测 300274：200 根→1 个中枢，270→2，300→3，400/500/640 都是 4。
+    // 窗口越短左侧历史越少，左侧中枢直接算不出来，而不是多造伪框。
+    // 所以取数应当尽量给满（当前用 640 根），不要因为「看起来够用」就截短。
+    final boxesAt = <int, int>{};
+    for (final n in [270, 300, 400, 640]) {
+      boxesAt[n] = Chanlun.analyze(bars.sublist(bars.length - n), formula).boxes.length;
+    }
+    expect(boxesAt[270], lessThan(boxesAt[640]), reason: '270 根应明显少于全量的中枢数');
+    expect(boxesAt[400], boxesAt[640], reason: '400 根起结果已收敛，与全量一致');
   });
 
   test('viewStart 只裁剪显示范围，不改变计算结果', () {
