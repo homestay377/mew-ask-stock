@@ -551,7 +551,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                   children: [
                     // K 线面板：收起时是一行胶囊，展开后占据上方空间。
                     // 放在 dock 测量范围内，消息列表会自动让出位置。
-                    StockChartPanel(state: stockPanel),
+                    StockChartPanel(
+                      state: stockPanel,
+                      // 「问这根 K 线」：把拼好的问句发出去，和手动输入走同一条路径。
+                      onAsk: (text) {
+                        _stickToBottom = true;
+                        _scrollToBottom();
+                        unawaited(c.send([TextPart(text)]));
+                      },
+                    ),
                     _Suggestions(
                       items: c.generating ? const [] : conv.suggestions,
                       onTap: (v) => c.send([TextPart(v)]),

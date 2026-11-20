@@ -14,6 +14,7 @@ import 'dart:typed_data';
 import 'package:gbk_codec/gbk_codec.dart';
 
 import 'chanlun.dart';
+import 'minute.dart';
 
 /// 取数失败。消息面向用户，不要暴露堆栈。
 class StockDataError implements Exception {
@@ -197,19 +198,27 @@ class StockSource {
   Future<KlineSeries> kline(String symbol, {String period = 'day', int count = chanBarCount}) async {
     final code = normalize(symbol);
     final p = normalizePeriod(period);
-    final isMinute = p.startsWith('m');
+    // ★ 不能用 startsWith('m')：month 也以 m 开头，会被误判为分钟线走 mkline 接口。
+    final isMinute = RegExp(r'^m\d+$').hasMatch(p);
 
     final String url;
     if (isMinute) {
       // 分钟线：必须 ifzq.gtimg.cn（web.ifzq 会 302 到 web3 超时）
-      url = 'https://ifzq.gtimg.cn/appstock/app/kline/mkline?param=$code,$p,,$count';
+      url = 'https://ifzq.gtimg.cn/appstock/app/kline/mkline?param=$code,$p,,,$count';
     } else {
-      // ★ 只能 3 个逗号：param=code,period,,,count,qfq。写成 4 个逗号月线会返回 bad params。
-      url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=$code,$p,,$count,qfq';
+      // 日/周/月线：param=code,period,,,count,qfq（4 个逗号是正确格式）
+      url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=$code,$p,,,$count,qfq';
     }
 
-    final body = await _text(url);
-    final root = jsonDecode(body);
+    // 腾讯接口偶发返回 param error / 空 data（抖动），重试一次再判失败。
+    String body = '';
+    dynamic root;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      body = await _text(url);
+      root = jsonDecode(body);
+      if (root is Map && root['code'] == 0 && root['data'] is Map) break;
+      if (attempt == 0) await Future<void>.delayed(const Duration(milliseconds: 400));
+    }
     if (root is! Map || root['code'] != 0) {
       throw StockDataError('接口返回异常：${body.length > 120 ? body.substring(0, 120) : body}');
     }
@@ -340,6 +349,115 @@ class StockSource {
     );
   }
 
+  // ------------------------------------------------------------ 分时
+
+  /// 当天分时。必须带 `Referer: https://gu.qq.com/`。
+  Future<MinuteSeries> minute(String symbol) async {
+    final code = normalize(symbol);
+    final url = 'https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=$code';
+    final body = await _text(url, referer: 'https://gu.qq.com/');
+    final root = jsonDecode(body);
+    if (root is! Map || root['code'] != 0) {
+      throw StockDataError('分时接口返回异常');
+    }
+    final data = root['data'];
+    if (data is! Map) throw StockDataError('分时返回里没有 data');
+    final node = data[code];
+    if (node is! Map) throw StockDataError('没有 $code 的分时数据');
+
+    var name = code;
+    final qt = node['qt'];
+    if (qt is Map) {
+      for (final v in qt.values) {
+        if (v is List && v.length > 1) {
+          name = v[1]?.toString() ?? code;
+          break;
+        }
+      }
+    }
+
+    final inner = node['data'];
+    if (inner is! Map) throw StockDataError('分时数据格式异常');
+    final date = inner['date']?.toString() ?? '';
+    final rows = inner['data'];
+    if (rows is! List || rows.isEmpty) throw StockDataError('分时数据为空');
+
+    final points = <MinutePoint>[];
+    for (final r in rows) {
+      if (r is! String) continue;
+      final f = r.split(' ');
+      if (f.length < 3) continue;
+      final price = double.tryParse(f[1]);
+      if (price == null) continue;
+      points.add(MinutePoint(f[0], price, double.tryParse(f[2]) ?? 0, f.length > 3 ? (double.tryParse(f[3]) ?? 0) : 0));
+    }
+    if (points.isEmpty) throw StockDataError('分时数据解析后为空');
+
+    // 昨收：优先用快照里的前收，拿不到就用分时第一根的价格兜底。
+    var prevClose = points.first.price;
+    try {
+      final q = await quote(code);
+      if (q.prevClose > 0) prevClose = q.prevClose;
+    } catch (_) {
+      // 拿不到就用首根，至少 0 轴位置不会崩
+    }
+
+    return MinuteSeries(symbol: code, name: name, date: date, points: points, prevClose: prevClose);
+  }
+
+  // ------------------------------------------------------------ 缓存
+
+  static const _freshMs = 60000;
+  static const _staleMs = 600000;
+  static const _minuteFreshMs = 15000;
+  static const _maxCache = 12;
+
+  final Map<String, _CacheEntry> _cache = {};
+
+  /// 带两级缓存取 K 线：1 分钟内直接命中；10 分钟内先返回旧值再后台刷新。
+  ///
+  /// [onStale] 用于把刷新后的结果推给界面；为 null 时只做同步刷新。
+  Future<KlineSeries> klineCached(String symbol, {String period = 'day', int count = chanBarCount}) {
+    final key = '${normalize(symbol)}|$period|$count';
+    final hit = _cache[key];
+    if (hit != null) {
+      final age = DateTime.now().difference(hit.at).inMilliseconds;
+      if (age < _freshMs) return Future.value(hit.series!);
+    }
+    final fresh = kline(symbol, period: period, count: count).then((s) {
+      _put(key, s);
+      return s;
+    });
+    return fresh;
+  }
+
+  void _put(String key, KlineSeries s) {
+    if (_cache.length >= _maxCache) {
+      // 简单淘汰：删掉最早的
+      String? oldestKey;
+      DateTime? oldest;
+      for (final e in _cache.entries) {
+        if (oldest == null || e.value.at.isBefore(oldest)) {
+          oldest = e.value.at;
+          oldestKey = e.key;
+        }
+      }
+      if (oldestKey != null) _cache.remove(oldestKey);
+    }
+    _cache[key] = _CacheEntry(s, DateTime.now());
+  }
+
+  /// 缓存是否已过期到需要后台刷新（10 分钟内不算过期）。
+  bool isStale(String symbol, {String period = 'day', int count = chanBarCount}) {
+    final hit = _cache['${normalize(symbol)}|$period|$count'];
+    if (hit == null) return true;
+    return DateTime.now().difference(hit.at).inMilliseconds > _staleMs;
+  }
+
+  void clearCache() => _cache.clear();
+
+  int get minuteFreshMs => _minuteFreshMs;
+
   // ------------------------------------------------------------ 多级别
 
   /// 并发拉多个级别，返回按固定顺序排列的结果（失败的有 error）。
@@ -359,4 +477,11 @@ class StockSource {
     );
     return [for (final r in results) ?r];
   }
+}
+
+class _CacheEntry {
+  _CacheEntry(this.series, this.at);
+
+  final KlineSeries? series;
+  final DateTime at;
 }

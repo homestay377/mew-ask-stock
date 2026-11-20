@@ -14,7 +14,10 @@ import 'package:flutter/material.dart';
 
 import '../../stock/chanlun.dart';
 import '../../stock/indicators.dart';
+import '../../stock/minute.dart';
 import '../../stock/stock_source.dart';
+
+import 'chart_gesture.dart';
 
 /// 主图指标键，顺序与 Eta 的 `MAIN_IND_KEYS` 一致。
 const mainIndKeys = ['MA', 'BOLL', 'CHAN', 'HOLLOW'];
@@ -22,7 +25,18 @@ const mainIndKeys = ['MA', 'BOLL', 'CHAN', 'HOLLOW'];
 /// 副图指标键，顺序与 Eta 的 `SUB_IND_KEYS` 一致。
 const subIndKeys = ['VOL', 'MACD', 'KDJ', 'RSI'];
 
-const _periodLabels = <String, String>{'week': '周', 'day': '日', 'm60': '60', 'm30': '30', 'm15': '15', 'm5': '5'};
+/// 周期顺序与 Eta 的 LEVELS 一致，末尾补 month（Eta 没有，本项目保留）。
+/// `minute` 是分时，走独立取数通道，不参与缠论计算。
+const _periodLabels = <String, String>{
+  'minute': '分时',
+  'day': '日',
+  'week': '周',
+  'month': '月',
+  'm60': '60',
+  'm30': '30',
+  'm15': '15',
+  'm5': '5',
+};
 
 String indLabel(String key, {bool hollow = false}) => switch (key) {
   'MA' => 'MA',
@@ -100,9 +114,12 @@ class StockPanelState extends ChangeNotifier {
 final stockPanel = StockPanelState();
 
 class StockChartPanel extends StatefulWidget {
-  const StockChartPanel({super.key, required this.state, this.source, this.maxHeight = 380});
+  const StockChartPanel({super.key, required this.state, this.source, this.onAsk, this.maxHeight = 380});
 
   final StockPanelState state;
+
+  /// 「问这根 K 线」把拼好的问句交给对话区。
+  final void Function(String text)? onAsk;
 
   /// 与工具层共用的数据源；传 null 时面板自建一个。
   final StockSource? source;
@@ -115,10 +132,20 @@ class StockChartPanel extends StatefulWidget {
 class _StockChartPanelState extends State<StockChartPanel> {
   StockSource? _ownSource;
   KlineSeries? _series;
+  MinuteSeries? _minute;
   ChanResult? _chan;
+  Quote? _quote;
   String? _error;
   bool _loading = false;
   String _lastKey = '';
+
+  final _viewport = ChartViewport();
+  final _cross = CrosshairState();
+
+  /// 当前指针指向的 K 线索引（用于「问这根」和顶部数值条）。
+  int _focus = -1;
+
+  bool get _isMinute => widget.state.period == 'minute';
 
   StockSource get _src => widget.source ?? (_ownSource ??= StockSource());
 
@@ -151,16 +178,44 @@ class _StockChartPanelState extends State<StockChartPanel> {
     setState(() {
       _loading = true;
       _error = null;
+      _focus = -1;
+      _cross.clear();
     });
+
+    // 行情卡与主数据并行取，互不阻塞。
+    _src
+        .quote(widget.state.symbol)
+        .then((q) {
+          if (!mounted || _lastKey != key) return;
+          setState(() => _quote = q);
+        })
+        .catchError((Object _) {});
+
     try {
-      final s = await _src.kline(widget.state.symbol, period: widget.state.period);
-      if (!mounted || '${widget.state.symbol}|${widget.state.period}' != key) return;
+      if (_isMinute) {
+        // 分时：独立通道，不算缠论（与 Eta 一致）。
+        final m = await _src.minute(widget.state.symbol);
+        if (!mounted || _lastKey != key) return;
+        _viewport.showAll(m.points.length);
+        setState(() {
+          _minute = m;
+          _series = null;
+          _chan = null;
+          _loading = false;
+        });
+        return;
+      }
+
+      final s = await _src.klineCached(widget.state.symbol, period: widget.state.period);
+      if (!mounted || _lastKey != key) return;
       ChanResult? ch;
       if (widget.state.showChan) {
         ch = Chanlun.analyze(s.bars, await _formula());
       }
+      _viewport.reset(s.bars.length);
       setState(() {
         _series = s;
+        _minute = null;
         _chan = ch;
         _loading = false;
       });
@@ -210,14 +265,54 @@ class _StockChartPanelState extends State<StockChartPanel> {
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
-          _PeriodRow(state: widget.state, onCollapse: widget.state.collapse),
-          Divider(height: 1, color: scheme.outlineVariant.withValues(alpha: 0.35)),
+          _PeriodRow(state: widget.state, onCollapse: widget.state.collapse, onAskBar: _canAsk ? _askAboutFocus : null),
+          if (_quote != null || _focusBar != null) _QuoteBar(quote: _quote, focusBar: _focusBar, focusDate: _focusDate),
           _IndBar(state: widget.state, onChange: _syncChan),
           Divider(height: 1, color: scheme.outlineVariant.withValues(alpha: 0.35)),
           Expanded(child: _buildBody(scheme)),
         ],
       ),
     );
+  }
+
+  /// 当前关注的那根 K 线：优先十字光标，其次最后一次点选。
+  int get _focusIdx => _cross.active ? _cross.index : _focus;
+
+  Bar? get _focusBar {
+    final s = _series;
+    if (s == null) return null;
+    final i = _focusIdx;
+    if (i < 0 || i >= s.bars.length) return null;
+    return s.bars[i];
+  }
+
+  String? get _focusDate {
+    final s = _series;
+    if (s == null) return null;
+    final i = _focusIdx;
+    if (i < 0 || i >= s.bars.length) return null;
+    return s.bars[i].t;
+  }
+
+  bool get _canAsk => _focusBar != null;
+
+  /// 把选中那根的完整数据拼成一句话问 AI（与 Eta 的「问 Eta 这根 K 线」同构）。
+  void _askAboutFocus() {
+    final b = _focusBar;
+    final s = _series;
+    if (b == null || s == null) return;
+    final periodName = _periodLabels[widget.state.period] ?? widget.state.period;
+    final text =
+        '请解读 ${s.name}(${s.symbol}) 在 ${b.t} 这根$periodNameK线：'
+        '开 ${b.o.toStringAsFixed(2)}，高 ${b.h.toStringAsFixed(2)}，'
+        '低 ${b.l.toStringAsFixed(2)}，收 ${b.c.toStringAsFixed(2)}，'
+        '量 ${b.v.toStringAsFixed(0)}。'
+        '这个位置的多空含义是什么？后续可能怎么走？';
+    widget.onAsk?.call(text);
+    setState(() {
+      _cross.clear();
+      _focus = -1;
+    });
   }
 
   Widget _buildBody(ColorScheme scheme) {
@@ -237,20 +332,52 @@ class _StockChartPanelState extends State<StockChartPanel> {
         ),
       );
     }
+    if (_isMinute) {
+      final m = _minute;
+      if (m == null || m.points.isEmpty) {
+        return Center(
+          child: Text('暂无分时数据', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
+        );
+      }
+      return _MinuteCanvas(series: m, scheme: scheme);
+    }
+
     final s = _series;
     if (s == null || s.bars.isEmpty) {
       return Center(
         child: Text('暂无数据', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
       );
     }
-    return _KlineCanvas(
-      series: s,
-      chan: _chan,
-      subInd: widget.state.subInd,
-      showMA: widget.state.showMA,
-      showBoll: widget.state.showBoll,
-      hollow: widget.state.hollow,
-      scheme: scheme,
+
+    return ChartGestureLayer(
+      viewport: _viewport,
+      onCrosshair: (i) => setState(() {
+        _cross.active = i >= 0;
+        _cross.index = i;
+      }),
+      onTapBar: (i) => setState(() {
+        _focus = i;
+        _cross.clear();
+      }),
+      onLongPressRelease: (i) => setState(() {
+        _focus = i;
+        _cross.clear();
+      }),
+      child: ListenableBuilder(
+        listenable: _viewport,
+        builder: (context, _) => _KlineCanvas(
+          series: s,
+          chan: _chan,
+          viewport: _viewport,
+          crossIndex: _cross.active ? _cross.index : -1,
+          focusIndex: _focus,
+          subInd: widget.state.subInd,
+          showMA: widget.state.showMA,
+          showBoll: widget.state.showBoll,
+          hollow: widget.state.hollow,
+          scheme: scheme,
+        ),
+      ),
     );
   }
 }
@@ -327,10 +454,13 @@ class _CollapsedBar extends StatelessWidget {
 
 /// 级别行：周期切换 + 收起按钮。
 class _PeriodRow extends StatelessWidget {
-  const _PeriodRow({required this.state, required this.onCollapse});
+  const _PeriodRow({required this.state, required this.onCollapse, this.onAskBar});
 
   final StockPanelState state;
   final VoidCallback onCollapse;
+
+  /// 非空时显示「问」按钮（选中某根 K 线后才出现）。
+  final VoidCallback? onAskBar;
 
   @override
   Widget build(BuildContext context) {
@@ -350,6 +480,26 @@ class _PeriodRow extends StatelessWidget {
               ),
             ),
           ),
+          if (onAskBar != null)
+            GestureDetector(
+              onTap: onAskBar,
+              child: Container(
+                margin: const EdgeInsets.only(right: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: scheme.primary.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.chat_bubble_outline_rounded, size: 12, color: scheme.primary),
+                    const SizedBox(width: 3),
+                    Text('问这根', style: TextStyle(fontSize: 11, color: scheme.primary)),
+                  ],
+                ),
+              ),
+            ),
           IconButton(
             visualDensity: VisualDensity.compact,
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -415,6 +565,239 @@ class _IndBar extends StatelessWidget {
   }
 }
 
+/// 行情条：现价/涨跌，或选中那根 K 线的开高低收。
+class _QuoteBar extends StatelessWidget {
+  const _QuoteBar({required this.quote, required this.focusBar, required this.focusDate});
+
+  final Quote? quote;
+  final Bar? focusBar;
+  final String? focusDate;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final up = const Color(0xFFE5484D);
+    final down = const Color(0xFF30A46C);
+
+    final b = focusBar;
+    if (b != null) {
+      // 选中某根：显示这根自己的数据（与 Eta 的光标信息条一致）
+      final isUp = b.c >= b.o;
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+        child: Row(
+          children: [
+            Text(
+              focusDate ?? '',
+              style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(width: 8),
+            _kv('开', b.o.toStringAsFixed(2), scheme),
+            _kv('高', b.h.toStringAsFixed(2), scheme),
+            _kv('低', b.l.toStringAsFixed(2), scheme),
+            _kv('收', b.c.toStringAsFixed(2), scheme, color: isUp ? up : down),
+            _kv('量', _fmtVol(b.v), scheme),
+          ],
+        ),
+      );
+    }
+
+    final q = quote;
+    if (q == null) return const SizedBox.shrink();
+    final color = q.change >= 0 ? up : down;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      child: Row(
+        children: [
+          Text(
+            q.name,
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: scheme.onSurface),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            q.price.toStringAsFixed(2),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            '${q.change >= 0 ? '+' : ''}${q.change.toStringAsFixed(2)} ${q.changePct.toStringAsFixed(2)}%',
+            style: TextStyle(fontSize: 10, color: color),
+          ),
+          const Spacer(),
+          _kv('开', q.open.toStringAsFixed(2), scheme),
+          _kv('高', q.high.toStringAsFixed(2), scheme),
+          _kv('低', q.low.toStringAsFixed(2), scheme),
+        ],
+      ),
+    );
+  }
+
+  Widget _kv(String k, String v, ColorScheme scheme, {Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 7),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(k, style: TextStyle(fontSize: 9.5, color: scheme.onSurfaceVariant)),
+          const SizedBox(width: 2),
+          Text(v, style: TextStyle(fontSize: 10, color: color ?? scheme.onSurface)),
+        ],
+      ),
+    );
+  }
+
+  static String _fmtVol(double v) {
+    if (v >= 100000000) return '${(v / 100000000).toStringAsFixed(2)}亿';
+    if (v >= 10000) return '${(v / 10000).toStringAsFixed(1)}万';
+    return v.toStringAsFixed(0);
+  }
+}
+
+/// 分时图：价格线 + 均价线 + 量柱，X 轴按全天时间等分（不是按根数）。
+class _MinuteCanvas extends StatelessWidget {
+  const _MinuteCanvas({required this.series, required this.scheme});
+
+  final MinuteSeries series;
+  final ColorScheme scheme;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, c) => CustomPaint(
+        size: Size(c.maxWidth, c.maxHeight),
+        painter: _MinutePainter(
+          series: series,
+          up: const Color(0xFFE5484D),
+          down: const Color(0xFF30A46C),
+          grid: scheme.outlineVariant.withValues(alpha: 0.35),
+          text: scheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+class _MinutePainter extends CustomPainter {
+  _MinutePainter({required this.series, required this.up, required this.down, required this.grid, required this.text});
+
+  final MinuteSeries series;
+  final Color up;
+  final Color down;
+  final Color grid;
+  final Color text;
+
+  /// A 股全天 241 个点（9:30–11:30 + 13:00–15:00）。
+  static const fullDay = 242;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final pts = series.points;
+    if (pts.isEmpty) return;
+
+    const padLeft = 2.0;
+    const padRight = 46.0;
+    const padTop = 4.0;
+    final subH = size.height * 0.24;
+    final mainH = size.height - subH - padTop - 2;
+    final w = size.width - padLeft - padRight;
+    if (w <= 0 || mainH <= 0) return;
+
+    final prev = series.prevClose;
+    final dev = series.maxDeviation();
+    final pad = dev == 0 ? 1.0 : dev * 1.1;
+    final hi = prev + pad;
+    final lo = prev - pad;
+    final span = hi - lo;
+
+    double yOf(double p) => padTop + (hi - p) / span * mainH;
+    double xOf(int i) => padLeft + (i / (fullDay - 1)) * w;
+
+    // 纵向网格 + 右侧价格
+    final gp = Paint()
+      ..color = grid
+      ..strokeWidth = 0.6;
+    final ts = TextStyle(color: text, fontSize: 8.5);
+    for (var i = 0; i <= 4; i++) {
+      final y = padTop + mainH * i / 4;
+      canvas.drawLine(Offset(padLeft, y), Offset(padLeft + w, y), gp);
+      final price = hi - span * i / 4;
+      final tp = TextPainter(
+        text: TextSpan(text: price.toStringAsFixed(2), style: ts),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(padLeft + w + 3, y - tp.height / 2));
+    }
+
+    // 昨收线（虚线感：用浅色实线代替）
+    final py = yOf(prev);
+    canvas.drawLine(
+      Offset(padLeft, py),
+      Offset(padLeft + w, py),
+      Paint()
+        ..color = grid
+        ..strokeWidth = 0.8,
+    );
+
+    // 价格线
+    final path = Path();
+    for (var i = 0; i < pts.length; i++) {
+      final x = xOf(i);
+      final y = yOf(pts[i].price);
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    final lineColor = series.lastPrice >= prev ? up : down;
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = lineColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2,
+    );
+
+    // 成交量柱（按累计量差分）
+    var prevVol = 0.0;
+    final vols = <double>[];
+    for (final p in pts) {
+      vols.add((p.volume - prevVol).clamp(0, double.infinity));
+      prevVol = p.volume;
+    }
+    var maxV = 0.0;
+    for (final v in vols) {
+      if (v > maxV) maxV = v;
+    }
+    if (maxV > 0) {
+      final bw = math.max(0.6, w / fullDay * 0.7);
+      for (var i = 0; i < pts.length; i++) {
+        final h = vols[i] / maxV * (subH - 4);
+        final x = xOf(i);
+        canvas.drawRect(
+          Rect.fromLTRB(x - bw / 2, size.height - 2 - h, x + bw / 2, size.height - 2),
+          Paint()..color = (pts[i].price >= prev ? up : down).withValues(alpha: 0.45),
+        );
+      }
+    }
+
+    // 时间刻度：9:30 / 11:30 / 13:00 / 15:00
+    final marks = <int, String>{0: '9:30', 120: '11:30', 121: '13:00', 241: '15:00'};
+    for (final e in marks.entries) {
+      final x = xOf(e.key);
+      if (x > padLeft + w) continue;
+      final tp = TextPainter(
+        text: TextSpan(text: e.value, style: ts),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(x - tp.width / 2, size.height - tp.height - 1));
+    }
+  }
+
+  @override
+  bool shouldRepaint(_MinutePainter old) => old.series != series;
+}
+
 class _Chip extends StatelessWidget {
   const _Chip({required this.label, required this.selected, required this.onTap});
 
@@ -454,6 +837,9 @@ class _KlineCanvas extends StatelessWidget {
   const _KlineCanvas({
     required this.series,
     required this.chan,
+    required this.viewport,
+    required this.crossIndex,
+    required this.focusIndex,
     required this.subInd,
     required this.showMA,
     required this.showBoll,
@@ -463,6 +849,13 @@ class _KlineCanvas extends StatelessWidget {
 
   final KlineSeries series;
   final ChanResult? chan;
+  final ChartViewport viewport;
+
+  /// 十字光标指向的索引；-1 表示不显示。
+  final int crossIndex;
+
+  /// 点选高亮的索引；-1 表示无。
+  final int focusIndex;
   final String subInd;
   final bool showMA;
   final bool showBoll;
@@ -472,8 +865,9 @@ class _KlineCanvas extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bars = series.bars;
-    final show = bars.length > 120 ? bars.sublist(bars.length - 120) : bars;
-    final offset = bars.length - show.length;
+    final start = viewport.start.clamp(0, bars.length);
+    final end = (start + viewport.visible).clamp(start, bars.length);
+    final show = bars.sublist(start, end);
 
     return LayoutBuilder(
       builder: (context, c) {
@@ -482,8 +876,10 @@ class _KlineCanvas extends StatelessWidget {
           painter: _KlinePainter(
             bars: show,
             allBars: bars,
-            offset: offset,
+            offset: start,
             chan: chan,
+            crossIndex: crossIndex,
+            focusIndex: focusIndex,
             subInd: subInd,
             showMA: showMA,
             showBoll: showBoll,
@@ -506,6 +902,8 @@ class _KlinePainter extends CustomPainter {
     required this.allBars,
     required this.offset,
     required this.chan,
+    required this.crossIndex,
+    required this.focusIndex,
     required this.subInd,
     required this.showMA,
     required this.showBoll,
@@ -523,6 +921,8 @@ class _KlinePainter extends CustomPainter {
   final List<Bar> allBars;
   final int offset;
   final ChanResult? chan;
+  final int crossIndex;
+  final int focusIndex;
   final String subInd;
   final bool showMA;
   final bool showBoll;
@@ -718,6 +1118,37 @@ class _KlinePainter extends CustomPainter {
         ..color = (bars.last.c >= bars.last.o ? up : down).withValues(alpha: 0.65)
         ..strokeWidth = 0.8,
     );
+
+    // ---- 选中高亮 + 十字光标 ----
+    final fi = focusIndex - offset;
+    if (fi >= 0 && fi < bars.length) {
+      canvas.drawRect(
+        Rect.fromLTRB(padLeft + fi * step, padTop, padLeft + (fi + 1) * step, padTop + mainH),
+        Paint()..color = up.withValues(alpha: 0.06),
+      );
+    }
+    final ci = crossIndex - offset;
+    if (ci >= 0 && ci < bars.length) {
+      final cx = xOf(ci);
+      final crossPaint = Paint()
+        ..color = text.withValues(alpha: 0.65)
+        ..strokeWidth = 0.9;
+      canvas.drawLine(Offset(cx, padTop), Offset(cx, size.height - 2), crossPaint);
+      final cy = yOf(bars[ci].c);
+      canvas.drawLine(Offset(padLeft, cy), Offset(padLeft + chartW, cy), crossPaint);
+      // 右侧价格气泡
+      final tp = TextPainter(
+        text: TextSpan(
+          text: bars[ci].c.toStringAsFixed(2),
+          style: TextStyle(color: (bars[ci].c >= bars[ci].o ? up : down), fontSize: 9),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final bh = tp.height + 4;
+      final rect = Rect.fromLTWH(padLeft + chartW + 1, cy - bh / 2, padRight - 2, bh);
+      canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(3)), Paint()..color = grid);
+      tp.paint(canvas, Offset(rect.left + 3, rect.top + 2));
+    }
 
     // ---- 副图 ----
     _paintSub(canvas, size, chartW, padLeft, subH, maxV);
@@ -947,6 +1378,8 @@ class _KlinePainter extends CustomPainter {
       old.bars != bars ||
       old.chan != chan ||
       old.offset != offset ||
+      old.crossIndex != crossIndex ||
+      old.focusIndex != focusIndex ||
       old.subInd != subInd ||
       old.showMA != showMA ||
       old.showBoll != showBoll ||
