@@ -18,6 +18,7 @@ import '../../data/conversation.dart';
 import '../../state/app_state.dart';
 import '../../state/settings_store.dart';
 import '../../state/tts.dart';
+import '../stock/stock_chart_panel.dart';
 import '../export.dart';
 import '../widgets/common.dart';
 import '../widgets/motion.dart';
@@ -548,6 +549,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // K 线面板：收起时是一行胶囊，展开后占据上方空间。
+                    // 放在 dock 测量范围内，消息列表会自动让出位置。
+                    StockChartPanel(state: stockPanel),
                     _Suggestions(
                       items: c.generating ? const [] : conv.suggestions,
                       onTap: (v) => c.send([TextPart(v)]),
