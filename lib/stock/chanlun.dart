@@ -263,11 +263,18 @@ class Chanlun {
   /// 右边界 = min(顶值不变终点, 下一同类起点-1, 断点-1, 该族轨上线延伸段末根)
   static List<ChanBox> boxSpans(Map<String, Float64List> d, int s0) {
     final res = <ChanBox>[];
-    for (final tag in ['红', '绿']) {
-      final startSeq = d[tag + '起'];
-      final topSeq = d[tag + '顶_锁定'];
-      final botSeq = d[tag + '底_锁定'];
-      final midSeq = d[tag + '中_锁定'];
+    // 序列名直接写全，避免「标识符 + 汉字」的插值歧义
+    // （'${color}起' 与 \'$color起\' 两种写法会被不同 lint 规则来回判为不合规）。
+    const families = <List<String>>[
+      ['红', '红起', '红顶_锁定', '红底_锁定', '红中_锁定', '红断点', '红轨上线'],
+      ['绿', '绿起', '绿顶_锁定', '绿底_锁定', '绿中_锁定', '绿断点', '绿轨上线'],
+    ];
+    for (final f in families) {
+      final color = f[0];
+      final startSeq = d[f[1]];
+      final topSeq = d[f[2]];
+      final botSeq = d[f[3]];
+      final midSeq = d[f[4]];
       if (startSeq == null || topSeq == null || botSeq == null) continue;
 
       final starts = <int>[];
@@ -275,7 +282,7 @@ class Chanlun {
         if (startSeq[i] > 0) starts.add(i);
       }
 
-      final brkSeq = d[tag + '断点'];
+      final brkSeq = d[f[5]];
       final brk = <int>[];
       if (brkSeq != null) {
         for (var i = 0; i < brkSeq.length; i++) {
@@ -283,7 +290,7 @@ class Chanlun {
         }
       }
 
-      final trackSeq = d[tag + '轨上线'];
+      final trackSeq = d[f[6]];
       final ok = <int>[];
       if (trackSeq != null) {
         for (var i = 0; i < trackSeq.length; i++) {
@@ -313,7 +320,7 @@ class Chanlun {
 
         final zg = topSeq[s];
         final zd = botSeq[s];
-        res.add(ChanBox(tag: tag, s: s, e: end, zg: zg, zd: zd, mid: midSeq != null ? midSeq[s] : (zg + zd) / 2));
+        res.add(ChanBox(tag: color, s: s, e: end, zg: zg, zd: zd, mid: midSeq != null ? midSeq[s] : (zg + zd) / 2));
       }
     }
     return res;
