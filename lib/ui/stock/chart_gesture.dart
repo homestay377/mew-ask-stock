@@ -45,6 +45,20 @@ class ChartViewport extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 直接设成目标可视根数（双指缩放用）。
+  ///
+  /// 用绝对值而不是增量：双指时两指间距会持续变化，
+  /// 增量累加会放大误差，也容易因为某一帧抖动而跳变。
+  void zoomTo(int target) {
+    final nv = target.clamp(minVisible, math.max(minVisible, total)).toInt();
+    if (nv == visible) return;
+    // 以右端为锚点：看盘时最新价保持不动更符合直觉
+    final rightEdge = start + visible;
+    visible = nv;
+    start = (rightEdge - visible).clamp(0, math.max(0, total - visible));
+    notifyListeners();
+  }
+
   void zoom(double factor) {
     final nv = (visible * factor).round().clamp(minVisible, math.max(minVisible, total)).toInt();
     if (nv == visible) return;
@@ -113,8 +127,16 @@ class _ChartGestureLayerState extends State<ChartGestureLayer> {
   Offset? _downPos;
   Offset? _lastPos;
 
-  /// 当前按在屏上的指针数。PointerMoveEvent 没有 pointerCount，只能自己数。
-  final Set<int> _pointers = <int>{};
+  /// 当前按在屏上的指针位置。PointerMoveEvent 没有 pointerCount，只能自己数。
+  final Map<int, Offset> _pointers = <int, Offset>{};
+
+  /// 双指缩放基准：开始双指那一刻的两指间距与当时的可视根数。
+  double _pinchStartDist = 0;
+  int _pinchStartVisible = 0;
+
+  /// 本次手势是否经历过多指。多指之后剩下一根手指时不再当作拖动，
+  /// 否则会因为缺少基准点而跳一下。
+  bool _multiTouchSession = false;
   bool _dragging = false;
   bool _longPressed = false;
   bool _lockAxis = false;
@@ -128,13 +150,28 @@ class _ChartGestureLayerState extends State<ChartGestureLayer> {
       onPointerUp: _onUp,
       onPointerCancel: (e) {
         _pointers.remove(e.pointer);
+        _resetPinch();
         _reset();
       },
       child: widget.child,
     );
   }
 
+  /// 两指之间的直线距离。
+  double _distanceBetweenPointers() {
+    if (_pointers.length < 2) return 0;
+    final pts = _pointers.values.toList();
+    return (pts[0] - pts[1]).distance;
+  }
+
+  /// 双指基准清零。少一根手指后，下次重新按第二指时会重新建立。
+  void _resetPinch() {
+    _pinchStartDist = 0;
+    _pinchStartVisible = 0;
+  }
+
   void _reset() {
+    _multiTouchSession = false;
     _downPos = null;
     _lastPos = null;
     _dragging = false;
@@ -143,7 +180,24 @@ class _ChartGestureLayerState extends State<ChartGestureLayer> {
   }
 
   void _onDown(PointerDownEvent e) {
-    _pointers.add(e.pointer);
+    _pointers[e.pointer] = e.localPosition;
+
+    // ★ 第二根手指按下，就是双指缩放的起点。
+    //   必须在这里建立基准：touchstart/pointerdown 不会因为「变成两指」再触发一次，
+    //   Eta 的原实现把基准放在 `touches.length === 2` 的 down 分支里，
+    //   那个分支几乎永不成立，pinchDist 一直是 0 或残留值，
+    //   于是 ratio 用错的基准算，方向看起来就反了。
+    if (_pointers.length == 2) {
+      _multiTouchSession = true;
+      _pinchStartDist = _distanceBetweenPointers();
+      _pinchStartVisible = widget.viewport.visible;
+      _dragging = true;
+      _lockAxis = true;
+      widget.onCrosshair(-1);
+      return;
+    }
+    if (_pointers.length > 2) return;
+
     _downPos = e.localPosition;
     _lastPos = e.localPosition;
     _dragging = false;
@@ -159,6 +213,23 @@ class _ChartGestureLayerState extends State<ChartGestureLayer> {
   }
 
   void _onMove(PointerMoveEvent e) {
+    _pointers[e.pointer] = e.localPosition;
+
+    // 双指：只按两指间距的比例缩放，不做平移。
+    if (_pointers.length >= 2) {
+      if (_pinchStartDist <= 0) return;
+      final d = _distanceBetweenPointers();
+      if (d <= 0) return;
+      // 拉开（d 变大）→ ratio > 1 → 可视根数变多？
+      // 不是：visible 是「可视根数」，根数越少每根越宽 = 放大。
+      // 所以拉开应当让 visible 变小，用初始间距 / 当前间距。
+      final target = (_pinchStartVisible * (_pinchStartDist / d)).round();
+      widget.viewport.zoomTo(target);
+      return;
+    }
+
+    if (_multiTouchSession) return;
+
     final last = _lastPos;
     if (last == null) return;
     final dx = e.localPosition.dx - last.dx;
@@ -181,13 +252,6 @@ class _ChartGestureLayerState extends State<ChartGestureLayer> {
     if (!_dragging) return;
 
     final vp = widget.viewport;
-    if (_pointers.length >= 2) {
-      // 双指缩放
-      final zoomFactor = math.exp(-dx / 60.0);
-      vp.zoom(1 / zoomFactor);
-      return;
-    }
-
     // 水平拖 → 平移；垂直拖 → 缩放
     if (dx.abs() > dy.abs() * 0.7) {
       final barW = _barWidth;
@@ -199,6 +263,17 @@ class _ChartGestureLayerState extends State<ChartGestureLayer> {
 
   void _onUp(PointerUpEvent e) {
     _pointers.remove(e.pointer);
+    _resetPinch();
+    // 所有手指都离开了，才结束这次手势
+    final allUp = _pointers.isEmpty;
+    if (!allUp) {
+      // 还剩手指：忽略后续移动，等全部抬起
+      _dragging = false;
+      return;
+    }
+    // 双指手势结束时不该再判定成「轻点选中」
+    final wasMulti = _multiTouchSession;
+    _multiTouchSession = false;
     final wasLong = _longPressed;
     final wasDrag = _dragging;
     final down = _downPos;
@@ -208,7 +283,7 @@ class _ChartGestureLayerState extends State<ChartGestureLayer> {
       widget.onLongPressRelease(_indexAt(e.localPosition));
       return;
     }
-    if (wasDrag || down == null) return;
+    if (wasMulti || wasDrag || down == null) return;
 
     // 轻点
     final moved = (e.localPosition - down).distance;
