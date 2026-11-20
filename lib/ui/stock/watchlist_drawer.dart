@@ -641,7 +641,7 @@ class _GroupSortSheet extends StatefulWidget {
 }
 
 class _GroupSortSheetState extends State<_GroupSortSheet> {
-  late List<WatchGroup> _list = List.of(widget.groups);
+  late final List<WatchGroup> _list = List.of(widget.groups);
 
   @override
   Widget build(BuildContext context) {
@@ -679,9 +679,10 @@ class _GroupSortSheetState extends State<_GroupSortSheet> {
           Expanded(
             child: ReorderableListView.builder(
               itemCount: _list.length,
-              onReorder: (oldIndex, newIndex) {
+              // Flutter 3.41+ 用 onReorderItem：新回调已经处理过「先移除后插入」的索引偏移，
+              // 不要再自己 newIndex--，否则会差一位。
+              onReorderItem: (oldIndex, newIndex) {
                 setState(() {
-                  if (newIndex > oldIndex) newIndex--;
                   final item = _list.removeAt(oldIndex);
                   _list.insert(newIndex, item);
                 });

@@ -234,7 +234,7 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           final payload = <String, dynamic>{
             'symbols': list,
             'levels': {for (var i = 0; i < list.length; i++) list[i]: results[i]},
-            if (truncated) 'note': '一次最多 ${maxSymbols} 只，已截断。剩下的请再调一次。',
+            if (truncated) 'note': '一次最多 $maxSymbols 只，已截断。剩下的请再调一次。',
           };
           return jsonEncode(payload);
         } catch (e) {
