@@ -219,7 +219,7 @@ class StockSource {
     if (node is! Map) throw StockDataError('没有找到 $code 的行情数据');
 
     // 字段名可能是 qfqday / day / qfqweek / week / m60 ...
-    List? rows;
+    List<dynamic>? rows;
     for (final key in ['qfq$p', p, 'qfq${p}day', '${p}day']) {
       final v = node[key];
       if (v is List && v.isNotEmpty) {
@@ -255,12 +255,12 @@ class StockSource {
     }
     if (bars.isEmpty) throw StockDataError('$code 的 K 线解析后为空');
 
-    final name = _nameFromNode(node) ?? code;
+    final name = _nameFromNode(node.cast<String, dynamic>()) ?? code;
 
     return KlineSeries(symbol: code, name: name, period: p, bars: bars);
   }
 
-  String? _nameFromNode(Map node) {
+  String? _nameFromNode(Map<String, dynamic> node) {
     final qt = node['qt'];
     if (qt is Map) {
       for (final v in qt.values) {
@@ -356,9 +356,6 @@ class StockSource {
         }
       }),
     );
-    return [
-      for (final r in results)
-        if (r != null) r,
-    ];
+    return [for (final r in results) ?r];
   }
 }
