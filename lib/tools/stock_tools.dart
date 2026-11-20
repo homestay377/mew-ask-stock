@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'package:flutter/services.dart' show rootBundle;
 
 import '../stock/chart_shapes.dart';
+import '../stock/stock_bridge.dart';
 import '../stock/shape_store.dart';
 import '../stock/stock_analyzer.dart';
 import '../stock/stock_source.dart';
