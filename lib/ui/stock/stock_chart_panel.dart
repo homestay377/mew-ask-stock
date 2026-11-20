@@ -13,7 +13,7 @@ import '../../stock/stock_source.dart';
 
 /// 面板状态：选中的代码、周期、是否展开。
 class StockPanelState extends ChangeNotifier {
-  StockPanelState({String symbol = 'sz300274', String period = 'day'}) : _symbol = symbol, _period = period;
+  StockPanelState({this._symbol = 'sz300274', this._period = 'day'});
 
   String _symbol;
   String _period;
@@ -68,7 +68,7 @@ final stockPanel = StockPanelState();
 const _periodLabels = <String, String>{'day': '日', 'week': '周', 'month': '月', 'm60': '60分', 'm30': '30分', 'm15': '15分'};
 
 class StockChartPanel extends StatefulWidget {
-  const StockChartPanel({super.key, required this.state, required this.source, this.maxHeight = 360});
+  const StockChartPanel({super.key, required this.state, this.source, this.maxHeight = 360});
 
   final StockPanelState state;
 
