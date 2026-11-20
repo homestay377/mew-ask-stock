@@ -6,61 +6,99 @@ library;
 
 import 'dart:convert';
 
-import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:io';
 
+import '../../core/paths.dart';
 import 'chart_shapes.dart';
 
-/// 画线持久化：按 `代码|周期` 分别存。
+/// 画线持久化：按「代码|周期」分别存。
+///
+/// 存在 `AppPaths.support/shapes.json` 一个文件里，键是 `代码|周期`。
+/// 不依赖 shared_preferences——MewHub 本身没有这个包，也没必要为它加依赖。
 class ShapeStore {
   ShapeStore._();
 
   static final ShapeStore instance = ShapeStore._();
 
-  final Map<String, List<ChartShape>> _cache = {};
+  static const _fileName = 'stock_shapes.json';
+
+  Map<String, List<ChartShape>>? _all;
+  Future<void>? _loading;
 
   String _key(String code, String period) => '$code|$period';
-  String _prefKey(String code, String period) => 'stock_shapes_${_key(code, period)}';
 
-  Future<List<ChartShape>> load(String code, String period) async {
-    final k = _key(code, period);
-    final hit = _cache[k];
-    if (hit != null) return hit;
+  File _file() => File('${AppPaths.support.path}/$_fileName');
+
+  Future<Map<String, List<ChartShape>>> _ensure() {
+    final hit = _all;
+    if (hit != null) return Future.value(hit);
+    final running = _loading;
+    if (running != null) return running.then((_) => _all!);
+    final f = _read();
+    _loading = f;
+    return f.then((_) => _all!);
+  }
+
+  Future<void> _read() async {
+    final out = <String, List<ChartShape>>{};
     try {
-      final sp = await SharedPreferences.getInstance();
-      final raw = sp.getString(_prefKey(code, period));
-      if (raw != null && raw.isNotEmpty) {
-        final list = jsonDecode(raw);
-        if (list is List) {
-          final out = [
-            for (final e in list)
-              if (e is Map) ChartShape.fromJson(e.cast<String, dynamic>()),
-          ];
-          _cache[k] = out;
-          return out;
+      final f = _file();
+      if (await f.exists()) {
+        final raw = await f.readAsString();
+        if (raw.trim().isNotEmpty) {
+          final decoded = jsonDecode(raw);
+          if (decoded is Map) {
+            for (final e in decoded.entries) {
+              final list = e.value;
+              if (list is List) {
+                out['${e.key}'] = [
+                  for (final x in list)
+                    if (x is Map) ChartShape.fromJson(x.cast<String, dynamic>()),
+                ];
+              }
+            }
+          }
         }
       }
     } catch (_) {
-      // 读失败按空处理，不影响看图
+      // 读坏了就当空的，不影响看图
     }
-    _cache[k] = [];
-    return _cache[k]!;
+    _all = out;
+  }
+
+  Future<void> _write() async {
+    try {
+      final all = _all;
+      if (all == null) return;
+      final f = _file();
+      await f.parent.create(recursive: true);
+      final tmp = File('${f.path}.tmp');
+      await tmp.writeAsString(
+        jsonEncode({
+          for (final e in all.entries) e.key: [for (final s in e.value) s.toJson()],
+        }),
+        flush: true,
+      );
+      await tmp.rename(f.path);
+    } catch (_) {
+      // 写失败只影响下次启动的持久化，本次会话仍可用
+    }
+  }
+
+  Future<List<ChartShape>> load(String code, String period) async {
+    final all = await _ensure();
+    return all[_key(code, period)] ?? const [];
   }
 
   Future<void> save(String code, String period, List<ChartShape> shapes) async {
-    _cache[_key(code, period)] = shapes;
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(_prefKey(code, period), jsonEncode([for (final s in shapes) s.toJson()]));
-    } catch (_) {
-      // 存失败就只保留内存里的，本次会话仍可用
-    }
+    final all = await _ensure();
+    all[_key(code, period)] = List<ChartShape>.from(shapes);
+    await _write();
   }
 
   Future<void> clear(String code, String period) async {
-    _cache[_key(code, period)] = [];
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.remove(_prefKey(code, period));
-    } catch (_) {}
+    final all = await _ensure();
+    all.remove(_key(code, period));
+    await _write();
   }
 }

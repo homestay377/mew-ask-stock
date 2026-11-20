@@ -1,13 +1,16 @@
 /// 自选股与分组。
 ///
 /// 与 Eta 的结构对齐：一只股票可以属于多个分组，分组是用户自建的标签集合。
-/// 存储走 `SharedPreferences`，不依赖数据库（MewHub 的 sqlite 表结构没必要动）。
+/// 存储走 `AppPaths.support/stock_watchlist.json`，不依赖数据库，也不引入新依赖。
 library;
 
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+
+import 'dart:io';
+
+import '../../core/paths.dart';
 
 /// 一个分组。
 class WatchGroup {
@@ -64,46 +67,63 @@ class WatchlistStore extends ChangeNotifier {
   /// 默认分组，首次使用时创建。
   String get defaultGroupId => _groups.isEmpty ? '' : _groups.first.id;
 
+  static const _fileName = 'stock_watchlist.json';
+
+  File _file() => File('${AppPaths.support.path}/$_fileName');
+
   Future<void> load() async {
     if (_loaded) return;
     try {
-      final sp = await SharedPreferences.getInstance();
-      final gRaw = sp.getString(_kGroups);
-      final iRaw = sp.getString(_kItems);
-      if (gRaw != null) {
-        final list = jsonDecode(gRaw);
-        if (list is List) {
-          _groups = [
-            for (final e in list)
-              if (e is Map) WatchGroup.fromJson(e.cast<String, dynamic>()),
-          ];
+      final f = _file();
+      if (await f.exists()) {
+        final raw = await f.readAsString();
+        if (raw.trim().isNotEmpty) {
+          final j = jsonDecode(raw);
+          if (j is Map) {
+            final g = j[_kGroups];
+            if (g is List) {
+              _groups = [
+                for (final e in g)
+                  if (e is Map) WatchGroup.fromJson(e.cast<String, dynamic>()),
+              ];
+            }
+            final i = j[_kItems];
+            if (i is List) {
+              _items = [
+                for (final e in i)
+                  if (e is Map) WatchItem.fromJson(e.cast<String, dynamic>()),
+              ];
+            }
+          }
         }
-      }
-      if (iRaw != null) {
-        final list = jsonDecode(iRaw);
-        if (list is List) {
-          _items = [
-            for (final e in list)
-              if (e is Map) WatchItem.fromJson(e.cast<String, dynamic>()),
-          ];
-        }
-      }
-      // 没有分组时建一个「全部」，保证有落脚点。
-      if (_groups.isEmpty) {
-        _groups = [WatchGroup(id: 'all', name: '全部')];
       }
     } catch (_) {
-      _groups = [WatchGroup(id: 'all', name: '全部')];
       _items = [];
+    }
+    // 没有分组时建一个「全部」，保证有落脚点。
+    if (_groups.isEmpty) {
+      _groups = [WatchGroup(id: 'all', name: '全部')];
     }
     _loaded = true;
     notifyListeners();
   }
 
   Future<void> _persist() async {
-    final sp = await SharedPreferences.getInstance();
-    await sp.setString(_kGroups, jsonEncode([for (final g in _groups) g.toJson()]));
-    await sp.setString(_kItems, jsonEncode([for (final i in _items) i.toJson()]));
+    try {
+      final f = _file();
+      await f.parent.create(recursive: true);
+      final tmp = File('${f.path}.tmp');
+      await tmp.writeAsString(
+        jsonEncode({
+          _kGroups: [for (final g in _groups) g.toJson()],
+          _kItems: [for (final i in _items) i.toJson()],
+        }),
+        flush: true,
+      );
+      await tmp.rename(f.path);
+    } catch (_) {
+      // 写失败只影响持久化，本次会话内的改动仍然有效
+    }
   }
 
   /// 某个分组下的股票。

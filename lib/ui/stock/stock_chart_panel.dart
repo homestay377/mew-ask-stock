@@ -1383,7 +1383,7 @@ class _KlinePainter extends CustomPainter {
     }
 
     // ---- 用户画线 ----
-    _paintShapes(canvas, padLeft, chartW, step, xOf, yOf, mainH);
+    _paintShapes(canvas, padLeft, padTop, chartW, step, xOf, yOf, mainH);
 
     // ---- 副图 ----
     _paintSub(canvas, size, chartW, padLeft, subH, maxV);
@@ -1393,6 +1393,7 @@ class _KlinePainter extends CustomPainter {
   void _paintShapes(
     Canvas canvas,
     double padLeft,
+    double padTop,
     double chartW,
     double step,
     double Function(int) xOf,
