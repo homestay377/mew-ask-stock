@@ -15,6 +15,7 @@ import 'package:gbk_codec/gbk_codec.dart';
 
 import 'chanlun.dart';
 import 'minute.dart';
+import 'stock_search.dart';
 
 /// 取数失败。消息面向用户，不要暴露堆栈。
 class StockDataError implements Exception {
@@ -347,6 +348,17 @@ class StockSource {
       volume: _d(data['f47']) ?? 0,
       amount: _d(data['f48']),
     );
+  }
+
+  // ------------------------------------------------------------ 搜索
+
+  /// 股票联想搜索。只返回可画 K 线的 A 股。
+  Future<List<StockHit>> search(String keyword) async {
+    final kw = keyword.trim();
+    if (kw.isEmpty) return const [];
+    final url = 'https://smartbox.gtimg.cn/s3/?v=2&q=${Uri.encodeQueryComponent(kw)}&t=all';
+    final body = await _text(url, referer: 'https://gu.qq.com/');
+    return parseSearchResponse(body);
   }
 
   // ------------------------------------------------------------ 分时
