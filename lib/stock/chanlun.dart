@@ -264,10 +264,10 @@ class Chanlun {
   static List<ChanBox> boxSpans(Map<String, Float64List> d, int s0) {
     final res = <ChanBox>[];
     for (final tag in ['红', '绿']) {
-      final startSeq = d['${tag}起'];
-      final topSeq = d['${tag}顶_锁定'];
-      final botSeq = d['${tag}底_锁定'];
-      final midSeq = d['${tag}中_锁定'];
+      final startSeq = d[tag + '起'];
+      final topSeq = d[tag + '顶_锁定'];
+      final botSeq = d[tag + '底_锁定'];
+      final midSeq = d[tag + '中_锁定'];
       if (startSeq == null || topSeq == null || botSeq == null) continue;
 
       final starts = <int>[];
@@ -275,7 +275,7 @@ class Chanlun {
         if (startSeq[i] > 0) starts.add(i);
       }
 
-      final brkSeq = d['${tag}断点'];
+      final brkSeq = d[tag + '断点'];
       final brk = <int>[];
       if (brkSeq != null) {
         for (var i = 0; i < brkSeq.length; i++) {
@@ -283,7 +283,7 @@ class Chanlun {
         }
       }
 
-      final trackSeq = d['${tag}轨上线'];
+      final trackSeq = d[tag + '轨上线'];
       final ok = <int>[];
       if (trackSeq != null) {
         for (var i = 0; i < trackSeq.length; i++) {
