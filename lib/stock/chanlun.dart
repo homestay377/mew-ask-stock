@@ -60,14 +60,7 @@ class PenPoint {
 
 /// 中枢框。
 class ChanBox {
-  ChanBox({
-    required this.tag,
-    required this.s,
-    required this.e,
-    required this.zg,
-    required this.zd,
-    required this.mid,
-  });
+  ChanBox({required this.tag, required this.s, required this.e, required this.zg, required this.zd, required this.mid});
 
   /// `红` / `绿`
   final String tag;
@@ -249,9 +242,7 @@ class Chanlun {
         final u = out[j];
         if ((u.e < b.e ? u.e : b.e) - (u.s > b.s ? u.s : b.s) <= 0) continue;
         final ov = (u.zg < b.zg ? u.zg : b.zg) - (u.zd > b.zd ? u.zd : b.zd);
-        final span = (u.zg - u.zd) < (b.zg - b.zd)
-            ? (u.zg - u.zd)
-            : (b.zg - b.zd);
+        final span = (u.zg - u.zd) < (b.zg - b.zd) ? (u.zg - u.zd) : (b.zg - b.zd);
         if (span > 0 && ov > 0.6 * span) {
           hit = j;
           break;
@@ -322,16 +313,7 @@ class Chanlun {
 
         final zg = topSeq[s];
         final zd = botSeq[s];
-        res.add(
-          ChanBox(
-            tag: tag,
-            s: s,
-            e: end,
-            zg: zg,
-            zd: zd,
-            mid: midSeq != null ? midSeq[s] : (zg + zd) / 2,
-          ),
-        );
+        res.add(ChanBox(tag: tag, s: s, e: end, zg: zg, zd: zd, mid: midSeq != null ? midSeq[s] : (zg + zd) / 2));
       }
     }
     return res;
@@ -343,10 +325,8 @@ class Chanlun {
     final a70 = d['X_70'];
     final a71 = d['X_71'];
     for (var i = s0; i < n; i++) {
-      if (a70 != null && a70[i] > 0)
-        pts.add(PenPoint(idx: i - s0, price: a70[i], type: '底'));
-      if (a71 != null && a71[i] > 0)
-        pts.add(PenPoint(idx: i - s0, price: a71[i], type: '顶'));
+      if (a70 != null && a70[i] > 0) pts.add(PenPoint(idx: i - s0, price: a70[i], type: '底'));
+      if (a71 != null && a71[i] > 0) pts.add(PenPoint(idx: i - s0, price: a71[i], type: '顶'));
     }
     pts.sort((a, b) => a.idx - b.idx);
     return pts;
@@ -397,15 +377,8 @@ class Chanlun {
   /// [bars] 时间正序。**必须喂全部可用历史**，不要只喂可视窗口。
   /// [load] 只用最后 N 根算（0 = 全部；除对账外不要用）。
   /// [viewStart] 可视窗口起点。计算仍在全历史上做，只把「完全落在窗口左侧」的中枢丢掉。
-  static ChanResult analyze(
-    List<Bar> bars,
-    String formulaText, {
-    int load = 0,
-    int viewStart = 0,
-  }) {
-    final b = (load > 0 && bars.length > load)
-        ? bars.sublist(bars.length - load)
-        : bars;
+  static ChanResult analyze(List<Bar> bars, String formulaText, {int load = 0, int viewStart = 0}) {
+    final b = (load > 0 && bars.length > load) ? bars.sublist(bars.length - load) : bars;
     final n = b.length;
     if (n == 0) {
       return ChanResult(
@@ -497,9 +470,7 @@ class Chanlun {
       if (cur.dir != prev.dir) continue;
       final up = cur.dir == 'up';
       // 必须创新极值：趋势背驰的定义是「新高/新低但力度不足」
-      final createsExtreme = up
-          ? cur.toPrice > prev.toPrice
-          : cur.toPrice < prev.toPrice;
+      final createsExtreme = up ? cur.toPrice > prev.toPrice : cur.toPrice < prev.toPrice;
       if (!createsExtreme) continue;
       final a1 = segArea(prev.from, prev.to, up);
       final a2 = segArea(cur.from, cur.to, up);
@@ -540,13 +511,7 @@ class Chanlun {
     //   卖点对称
     final points = <ChanPoint>[];
 
-    void pushPoint(
-      int idx,
-      String kind,
-      double price,
-      String why,
-      ChanBox? box,
-    ) {
+    void pushPoint(int idx, String kind, double price, String why, ChanBox? box) {
       points.add(
         ChanPoint(
           idx: idx,
@@ -554,14 +519,7 @@ class Chanlun {
           label: kind,
           price: price,
           reason: why,
-          box: box == null
-              ? null
-              : BoxRef(
-                  box.s,
-                  box.e,
-                  double.parse(_fmt2(box.zg)),
-                  double.parse(_fmt2(box.zd)),
-                ),
+          box: box == null ? null : BoxRef(box.s, box.e, double.parse(_fmt2(box.zg)), double.parse(_fmt2(box.zd))),
         ),
       );
     }
@@ -574,13 +532,7 @@ class Chanlun {
 
       if (sg.type == 'buy' && lastBoxAt != null && sg.price < lastBoxAt.zd) {
         // 一买：中枢下方的底背驰
-        pushPoint(
-          sg.idx,
-          '一买',
-          sg.price,
-          '下跌笔在中枢下方底背驰，力度衰减 ${sg.strength}（中枢 ZD=${_fmt2(lastBoxAt.zd)}）',
-          lastBoxAt,
-        );
+        pushPoint(sg.idx, '一买', sg.price, '下跌笔在中枢下方底背驰，力度衰减 ${sg.strength}（中枢 ZD=${_fmt2(lastBoxAt.zd)}）', lastBoxAt);
 
         // 二买：一买之后的下一次回调低点不破一买低点
         final afterIdx = sg.idx;
@@ -588,13 +540,7 @@ class Chanlun {
         for (final seg2 in bi) {
           if (seg2.from < afterIdx) continue;
           if (seg2.dir == 'down' && seg2.toPrice > firstLow) {
-            pushPoint(
-              seg2.to,
-              '二买',
-              seg2.toPrice,
-              '回调低点 ${_fmt2(seg2.toPrice)} 未破一买低点 ${_fmt2(firstLow)}',
-              lastBoxAt,
-            );
+            pushPoint(seg2.to, '二买', seg2.toPrice, '回调低点 ${_fmt2(seg2.toPrice)} 未破一买低点 ${_fmt2(firstLow)}', lastBoxAt);
             break;
           }
           if (seg2.dir == 'down' && seg2.toPrice <= firstLow) break; // 破了就不是二买
@@ -603,36 +549,18 @@ class Chanlun {
 
       // 三买：价格在最后一个中枢上方，回调不跌回 ZG
       if (sg.type == 'buy' && lastBoxAt != null && sg.price > lastBoxAt.zg) {
-        pushPoint(
-          sg.idx,
-          '三买',
-          sg.price,
-          '中枢上方回抽不破 ZG=${_fmt2(lastBoxAt.zg)}，底背驰力度 ${sg.strength}',
-          lastBoxAt,
-        );
+        pushPoint(sg.idx, '三买', sg.price, '中枢上方回抽不破 ZG=${_fmt2(lastBoxAt.zg)}，底背驰力度 ${sg.strength}', lastBoxAt);
       }
 
       if (sg.type == 'sell' && lastBoxAt != null && sg.price > lastBoxAt.zg) {
-        pushPoint(
-          sg.idx,
-          '一卖',
-          sg.price,
-          '上涨笔在中枢上方顶背驰，力度衰减 ${sg.strength}（中枢 ZG=${_fmt2(lastBoxAt.zg)}）',
-          lastBoxAt,
-        );
+        pushPoint(sg.idx, '一卖', sg.price, '上涨笔在中枢上方顶背驰，力度衰减 ${sg.strength}（中枢 ZG=${_fmt2(lastBoxAt.zg)}）', lastBoxAt);
 
         final afterIdx2 = sg.idx;
         final firstHigh = sg.price;
         for (final seg3 in bi) {
           if (seg3.from < afterIdx2) continue;
           if (seg3.dir == 'up' && seg3.toPrice < firstHigh) {
-            pushPoint(
-              seg3.to,
-              '二卖',
-              seg3.toPrice,
-              '反弹高点 ${_fmt2(seg3.toPrice)} 未破一卖高点 ${_fmt2(firstHigh)}',
-              lastBoxAt,
-            );
+            pushPoint(seg3.to, '二卖', seg3.toPrice, '反弹高点 ${_fmt2(seg3.toPrice)} 未破一卖高点 ${_fmt2(firstHigh)}', lastBoxAt);
             break;
           }
           if (seg3.dir == 'up' && seg3.toPrice >= firstHigh) break;
@@ -640,21 +568,13 @@ class Chanlun {
       }
 
       if (sg.type == 'sell' && lastBoxAt != null && sg.price < lastBoxAt.zd) {
-        pushPoint(
-          sg.idx,
-          '三卖',
-          sg.price,
-          '中枢下方反抽不上 ZD=${_fmt2(lastBoxAt.zd)}，顶背驰力度 ${sg.strength}',
-          lastBoxAt,
-        );
+        pushPoint(sg.idx, '三卖', sg.price, '中枢下方反抽不上 ZD=${_fmt2(lastBoxAt.zd)}，顶背驰力度 ${sg.strength}', lastBoxAt);
       }
     }
 
     // 按时间排序、去重（同 idx 同 label 只留一个）
     final seen = <String>{};
-    final deduped =
-        points.where((p) => seen.add('${p.idx}|${p.label}')).toList()
-          ..sort((a, b) => a.idx - b.idx);
+    final deduped = points.where((p) => seen.add('${p.idx}|${p.label}')).toList()..sort((a, b) => a.idx - b.idx);
 
     final lastBox = boxes.isEmpty ? null : boxes.last;
     String? boxPosition;
