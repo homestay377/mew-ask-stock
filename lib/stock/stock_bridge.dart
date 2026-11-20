@@ -15,6 +15,15 @@ abstract class StockPanelRequest {
 
   /// 当前面板是否可见（供模型判断要不要再切）。
   bool get visible;
+
+  /// 面板当前正在看的标的（形如 `sz300274`）。未接入时为 null。
+  String? get currentSymbol;
+
+  /// 面板当前的周期。
+  String? get currentPeriod;
+
+  /// 通知面板重新读画线（AI 刚画完时调用）。
+  void refreshShapes();
 }
 
 /// 默认实现：什么都不做（未接入 UI 时调用工具不会崩）。
@@ -24,6 +33,15 @@ class _NoopStockPanelRequest implements StockPanelRequest {
 
   @override
   bool get visible => false;
+
+  @override
+  String? get currentSymbol => null;
+
+  @override
+  String? get currentPeriod => null;
+
+  @override
+  void refreshShapes() {}
 }
 
 StockPanelRequest _impl = _NoopStockPanelRequest();

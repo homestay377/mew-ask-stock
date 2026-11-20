@@ -26,6 +26,8 @@ Future<void> main() async {
   setStockFormulaLoader(() => rootBundle.loadString('assets/stock/chan_formula.txt'));
   // 让 AI 的工具能驱动 K 线面板（stock_panel_show）。
   installStockPanelBridge();
+  // 恢复上次看的标的（首次启动是上证指数）。
+  await stockPanel.restore();
 
   await AppPaths.init();
   await Attachments.recoverLostChatPhotos();

@@ -26,6 +26,23 @@ Future<String> _formula() async {
   return text;
 }
 
+/// 解析工具要分析哪只股票。
+///
+/// **不传就用面板当前的标的**——用户说「分析一下」时，指的就是他正在看的那只。
+/// 这比让模型追问一句「你说哪只」自然得多。
+String? resolveSymbol(Object? raw) {
+  final s = '${raw ?? ''}'.trim();
+  if (s.isNotEmpty) return s;
+  final cur = stockPanelRequest.currentSymbol;
+  return (cur == null || cur.isEmpty) ? null : cur;
+}
+
+/// 面板当前的周期，作为不传 period 时的默认值。
+String? panelPeriod() {
+  final p = stockPanelRequest.currentPeriod;
+  return (p == null || p.isEmpty) ? null : p;
+}
+
 /// 构造股票工具集。
 ///
 /// [enabled] 为 false 时返回空列表，方便在设置里一键关掉。
@@ -45,22 +62,19 @@ List<AppTool> buildStockTools({bool enabled = true}) {
       description:
           '获取 A 股/指数的 K 线数据。返回最近若干根的开高低收量与均线、涨跌幅。'
           '用于确认价格位置、趋势方向和关键价位。代码可用 6 位数字（300274）或带前缀（sz300274）。',
-      parameters: objectSchema(
-        {
-          'symbol': strProp('股票代码，如 300274 或 sh600519'),
-          'period': strProp(
-            '周期：day/week/month/m60/m30/m15/m5，默认 day',
-            enumValues: ['day', 'week', 'month', 'm60', 'm30', 'm15', 'm5'],
-          ),
-          'count': intProp('取多少根，默认 60，最多 640'),
-        },
-        required: ['symbol'],
-      ),
+      parameters: objectSchema({
+        'symbol': strProp('股票代码，如 300274 / sh510300 / sh000001。不传则分析面板当前标的'),
+        'period': strProp(
+          '周期：day/week/month/m60/m30/m15/m5，默认 day',
+          enumValues: ['day', 'week', 'month', 'm60', 'm30', 'm15', 'm5'],
+        ),
+        'count': intProp('取多少根，默认 60，最多 640'),
+      }),
       promptHint: '取到 K 线后先看趋势方向和关键价位，再谈结论；不要凭一根 K 线下判断。',
       execute: (args) async {
         try {
-          final symbol = '${args['symbol'] ?? ''}'.trim();
-          if (symbol.isEmpty) return jsonEncode({'error': '缺少 symbol'});
+          final symbol = resolveSymbol(args['symbol']);
+          if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
           final period = '${args['period'] ?? 'day'}';
           final rawCount = args['count'];
           final count = rawCount is int ? rawCount.clamp(1, chanBarCount) : 60;
@@ -102,23 +116,20 @@ List<AppTool> buildStockTools({bool enabled = true}) {
       description:
           '对单个标的做缠论分析：笔、中枢、背驰、三类买卖点（一买/二买/三买/一卖/二卖/三卖）。'
           '返回可直接引用的中文结论与全部关键数字。这是分析走势结构的首选工具。',
-      parameters: objectSchema(
-        {
-          'symbol': strProp('股票代码，如 300274'),
-          'period': strProp(
-            '周期：day/week/month/m60/m30/m15，默认 day',
-            enumValues: ['day', 'week', 'month', 'm60', 'm30', 'm15'],
-          ),
-        },
-        required: ['symbol'],
-      ),
+      parameters: objectSchema({
+        'symbol': strProp('股票代码。不传则分析面板当前标的'),
+        'period': strProp(
+          '周期：day/week/month/m60/m30/m15，默认沿用面板周期',
+          enumValues: ['day', 'week', 'month', 'm60', 'm30', 'm15'],
+        ),
+      }),
       promptHint:
           '缠论结论要给依据：中枢区间、背驰力度、买卖点位置。买卖点不是买卖建议，'
           '要说清它成立的条件和失效的价位。',
       execute: (args) async {
         try {
-          final symbol = '${args['symbol'] ?? ''}'.trim();
-          if (symbol.isEmpty) return jsonEncode({'error': '缺少 symbol'});
+          final symbol = resolveSymbol(args['symbol']);
+          if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
           final period = '${args['period'] ?? 'day'}';
           final az = await analyzer();
           final r = await az.analyze(symbol, period: period);
@@ -133,11 +144,11 @@ List<AppTool> buildStockTools({bool enabled = true}) {
       name: 'stock_quote',
       displayName: '实时行情',
       description: '获取实时价格、涨跌幅、开高低、成交量。用于确认当前价位，回答「现在多少钱」这类问题。',
-      parameters: objectSchema({'symbol': strProp('股票代码，如 300274')}, required: ['symbol']),
+      parameters: objectSchema({'symbol': strProp('股票代码。不传则取面板当前标的')}),
       execute: (args) async {
         try {
-          final symbol = '${args['symbol'] ?? ''}'.trim();
-          if (symbol.isEmpty) return jsonEncode({'error': '缺少 symbol'});
+          final symbol = resolveSymbol(args['symbol']);
+          if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
           final q = await source.quote(symbol);
           return jsonEncode({
             'symbol': q.symbol,
@@ -355,13 +366,19 @@ List<AppTool> buildStockTools({bool enabled = true}) {
       name: 'chart_annotate',
       displayName: '标注',
       description:
-          '在 K 线图上画标注：水平线（支撑/压力/止损价）、趋势线、矩形区间、文字、箭头。'
-          '当你要给出具体价位（支撑位、压力位、止损价、目标价）时用它画出来，'
-          '比只在文字里报数字清楚得多。多次调用会累加。',
+          '在 K 线图上画标注：水平线（支撑/压力/止损价）、趋势线、矩形区间、文字、箭头、圆点。\n'
+          '用户看图比你说话快。只要你的回答里出现了具体价位、区间或走势判断，就应该画出来——'
+          '让图和你说的对上，用户不用在文字和数字之间来回换算。\n'
+          '典型用法：\n'
+          '  · 提到「支撑 68.5」→ hline 画一条，配 text 写「支撑」\n'
+          '  · 提到「中枢 ZG=71.74 ZD=62.24」→ rect 把区间框出来\n'
+          '  · 提到「这个下跌笔要跌破 X 才失效」→ arrow 从当前价指向 X\n'
+          '  · 提到「三买出现在某根」→ dot 标在那根上\n'
+          '多次调用会累加，不会覆盖。',
       parameters: objectSchema(
         {
-          'symbol': strProp('股票代码，如 300274'),
-          'period': strProp('周期：day/week/month/m60/m30/m15，默认 day'),
+          'symbol': strProp('股票代码。不传则画在面板当前标的上'),
+          'period': strProp('周期：day/week/month/m60/m30/m15，默认沿用面板周期'),
           'shapes': {
             'type': 'array',
             'description': '要画的图元列表',
@@ -380,13 +397,15 @@ List<AppTool> buildStockTools({bool enabled = true}) {
             },
           },
         },
-        required: ['symbol', 'shapes'],
+        required: ['shapes'],
       ),
-      promptHint: '画完要说明每条线代表什么价位、为什么在这个位置，不要只报坐标。',
+      promptHint:
+          '画完要说明每条线代表什么价位、为什么在这个位置，不要只报坐标。'
+          '正文里提到的关键价位，图上都应该能找到对应的线。',
       execute: (args) async {
         try {
-          final symbol = '${args['symbol'] ?? ''}'.trim();
-          if (symbol.isEmpty) return jsonEncode({'error': '缺少 symbol'});
+          final symbol = resolveSymbol(args['symbol']);
+          if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
           final period = '${args['period'] ?? 'day'}';
           final raw = args['shapes'];
           if (raw is! List || raw.isEmpty) return jsonEncode({'error': 'shapes 不能为空'});
@@ -447,6 +466,12 @@ List<AppTool> buildStockTools({bool enabled = true}) {
 
           final next = [...existing, ...added];
           await ShapeStore.instance.save(series.symbol, period, next);
+
+          // 如果画的正是面板当前那一屏，让它立刻重读，用户不用手动刷新
+          if (stockPanelRequest.currentSymbol == series.symbol &&
+              (stockPanelRequest.currentPeriod == null || stockPanelRequest.currentPeriod == period)) {
+            stockPanelRequest.refreshShapes();
+          }
 
           return jsonEncode({
             'ok': true,

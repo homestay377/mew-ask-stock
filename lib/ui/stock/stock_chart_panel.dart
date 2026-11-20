@@ -9,11 +9,14 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/paths.dart';
 import '../../stock/chanlun.dart';
 import '../../stock/indicators.dart';
 import '../../stock/chart_shapes.dart';
@@ -56,9 +59,12 @@ String indLabel(String key, {bool hollow = false}) => switch (key) {
   _ => key,
 };
 
+/// 面板没记住上次选择时用的默认标的：上证指数。
+const String defaultPanelSymbol = 'sh000001';
+
 /// 面板状态：级别、指标开关、是否展开。
 class StockPanelState extends ChangeNotifier {
-  StockPanelState({this._symbol = 'sz300274', this._period = 'day'});
+  StockPanelState({this._symbol = defaultPanelSymbol, this._period = 'day'});
 
   String _symbol;
   String _period;
@@ -120,6 +126,43 @@ class StockPanelState extends ChangeNotifier {
     _symbol = s;
     if (name != null) _name = name;
     notifyListeners();
+    unawaited(_persist());
+  }
+
+  /// 记住当前标的与周期，下次启动恢复。
+  ///
+  /// 用 `AppPaths.support` 下的一个小文件，不引入新依赖。
+  /// 写失败只影响「下次启动记不住」，不影响本次使用。
+  Future<void> _persist() async {
+    try {
+      final f = File('${AppPaths.support.path}/stock_panel.json');
+      await f.parent.create(recursive: true);
+      await f.writeAsString(
+        jsonEncode({'symbol': _symbol, 'period': _period, if (_name != null) 'name': _name}),
+        flush: true,
+      );
+    } catch (_) {}
+  }
+
+  /// 启动时恢复上次看的标的。没有记录时保持默认（上证指数）。
+  Future<void> restore() async {
+    try {
+      final f = File('${AppPaths.support.path}/stock_panel.json');
+      if (!await f.exists()) return;
+      final raw = await f.readAsString();
+      if (raw.trim().isEmpty) return;
+      final j = jsonDecode(raw);
+      if (j is! Map) return;
+      final sym = j['symbol']?.toString();
+      final per = j['period']?.toString();
+      final nm = j['name']?.toString();
+      if (sym != null && sym.isNotEmpty) _symbol = sym;
+      if (per != null && per.isNotEmpty) _period = per;
+      if (nm != null && nm.isNotEmpty) _name = nm;
+      notifyListeners();
+    } catch (_) {
+      // 记录损坏就用默认值
+    }
   }
 
   void setPeriod(String v) {
@@ -142,6 +185,15 @@ class StockPanelState extends ChangeNotifier {
 /// 全局单例：会话之间共用一个面板。
 final stockPanel = StockPanelState();
 
+/// 面板刷新画线的钩子。工具层画完线后调用，面板会重新读一次。
+VoidCallback? _shapesRefreshHook;
+
+/// 注册画线刷新钩子（由面板自身在挂载时设置）。
+void setShapesRefreshHook(VoidCallback? fn) => _shapesRefreshHook = fn;
+
+/// 通知可能有新画线（工具层调用）。
+void notifyShapesChanged() => _shapesRefreshHook?.call();
+
 /// 把面板接到工具层的桥：模型调用 stock_panel_show 时走这里。
 class _PanelRequest implements StockPanelRequest {
   @override
@@ -154,6 +206,15 @@ class _PanelRequest implements StockPanelRequest {
 
   @override
   bool get visible => stockPanel.expanded;
+
+  @override
+  String? get currentSymbol => stockPanel.symbol;
+
+  @override
+  String? get currentPeriod => stockPanel.period;
+
+  @override
+  void refreshShapes() => notifyShapesChanged();
 }
 
 /// App 启动时调用一次，把真实实现交给工具层。
@@ -210,11 +271,14 @@ class _StockChartPanelState extends State<StockChartPanel> {
     super.initState();
     widget.state.addListener(_onStateChanged);
     unawaited(_watch.load());
+    // AI 画完线会触发这个回调，重新读一次
+    setShapesRefreshHook(_reloadShapesSilently);
     if (widget.state.expanded) _load();
   }
 
   @override
   void dispose() {
+    setShapesRefreshHook(null);
     widget.state.removeListener(_onStateChanged);
     // 共享数据源不关：其他面板/工具还在用同一条连接与缓存。
     super.dispose();
@@ -360,6 +424,14 @@ class _StockChartPanelState extends State<StockChartPanel> {
         ],
       ),
     );
+  }
+
+  /// 静默重读画线：AI 刚画完时调用，不重取 K 线。
+  Future<void> _reloadShapesSilently() async {
+    if (!mounted) return;
+    final shapes = await ShapeStore.instance.load(widget.state.symbol, widget.state.period);
+    if (!mounted) return;
+    setState(() => _shapes = shapes);
   }
 
   /// 打开搜索浮层，选中后切股。

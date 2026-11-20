@@ -23,15 +23,38 @@ class StockHit {
   /// 腾讯用的完整代码，如 `sz300274`。
   String get fullCode => '$market$code';
 
-  /// 是否是可画 K 线的 A 股。港股/美股/基金的字段口径不同，面板不接。
-  bool get isAShare => (market == 'sz' || market == 'sh' || market == 'bj') && type.startsWith('GP-A');
+  /// 是否是可画 K 线的标的。
+  ///
+  /// 实测腾讯 smartbox 的 type 有这几种：
+  ///  - `GP-A` / `GP-A-KCB`  A 股（含科创板）
+  ///  - `ETF`                场内 ETF
+  ///  - `ZS`                 指数
+  ///  - `LOF`                LOF 基金
+  ///  - `GP`                 港股 / 美股
+  /// 前三类都能正常取到 K 线（已实测 510300/000001/000300/159915），放行；
+  /// 港股美股字段口径不同，面板暂不支持。
+  bool get isSupported =>
+      (market == 'sz' || market == 'sh' || market == 'bj') &&
+      (type.startsWith('GP-A') || type == 'ETF' || type == 'ZS' || type == 'LOF');
+
+  /// 向后兼容旧名字。
+  bool get isAShare => isSupported;
+
+  /// 人类可读的类型标签。
+  String get typeLabel {
+    if (type == 'ETF') return 'ETF';
+    if (type == 'ZS') return '指数';
+    if (type == 'LOF') return 'LOF';
+    if (type.startsWith('GP-A')) return type == 'GP-A-KCB' ? '科创板' : 'A股';
+    return type;
+  }
 
   String get display => '$name $code';
 }
 
 /// 解析 `v_hint="..."` 的原始响应。
 ///
-/// [aShareOnly] 为 true 时只保留 A 股（面板用）。
+/// [aShareOnly] 为 true 时只保留面板能画的标的（A 股 / ETF / 指数 / LOF）。
 List<StockHit> parseSearchResponse(String body, {bool aShareOnly = true}) {
   final m = RegExp(r'v_hint="([\s\S]*)"').firstMatch(body);
   if (m == null) return const [];
@@ -49,7 +72,7 @@ List<StockHit> parseSearchResponse(String body, {bool aShareOnly = true}) {
       pinyin: f[3],
       type: f.length > 4 ? f[4] : '',
     );
-    if (aShareOnly && !hit.isAShare) continue;
+    if (aShareOnly && !hit.isSupported) continue;
     if (hit.code.length != 6) continue;
     out.add(hit);
   }
