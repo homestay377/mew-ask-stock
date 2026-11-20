@@ -1,0 +1,100 @@
+<div align="center">
+  <img src="assets/images/icon.png" width="112" alt="MewHub icon" />
+  <h1>MewHub</h1>
+  <p>A warm, milk-white AI chat client for Android and iOS, built with Flutter.</p>
+  <p>
+    <a href="https://github.com/mizaawa/mewhub/actions/workflows/ci.yml"><img src="https://github.com/mizaawa/mewhub/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+    <a href="https://github.com/mizaawa/mewhub/releases/latest"><img src="https://img.shields.io/github/v/release/mizaawa/mewhub?include_prereleases" alt="Release" /></a>
+  </p>
+  <p><a href="#中文">中文</a> · <a href="#english">English</a></p>
+</div>
+
+---
+
+## 中文
+
+MewHub 是一个多供应商 AI 聊天客户端，功能参考 [RikkaHub](https://github.com/rikkahub/rikkahub)，用 Flutter 重写以同时支持 Android 与 iOS。界面是奶白色系，动画贯穿全程。
+
+### 功能
+
+- **四种协议原生实现**：OpenAI Chat Completions、OpenAI Responses、Anthropic Messages、Google Gemini，全部流式输出
+- **任意第三方 API**：自定义 Base URL / 路径 / 请求头 / 请求体，多 Key 轮询，余额查询；内置 DeepSeek、OpenRouter、硅基流动、月之暗面、百炼、火山、智谱、xAI、Ollama 等模板
+- **导入配置**：扫码 / 剪贴板导入，兼容 RikkaHub 的 `ai-provider:v1:` 分享码与通用 JSON
+- **深度思考**：思考强度滑动条六档（Auto / Low / Medium / High / XHigh / Max），模型不支持的档位自动降级，新对话沿用上次的模型与强度；输入框可一键展开全屏编辑；按厂商自动转换参数（Claude adaptive thinking、OpenAI reasoning effort、Gemini thinkingConfig、DeepSeek/Qwen/GLM/Kimi 开关），思考过程可折叠；签名与加密推理内容会正确回传，多轮工具调用不丢上下文
+- **工具调用（Agent 循环）**：联网搜索（Bing 免 Key、Tavily、Exa、Brave、Serper、Jina、智谱、博查、Perplexity、SearXNG、LinkUp）、网页读取、长期记忆、计算器、时间、剪贴板、设备信息；运行前可要求确认
+- **坐标系显示**：在助手设置的本地工具中一键开启二维平面与三维空间绘图；助手可以在聊天里绘制函数、圆与圆锥曲线、渐近线、线段、三维曲面和坐标点。三维图表使用设备本地投影与深度排序渲染，无需外部生图服务；预览与全屏均支持单指旋转、双指平移和捏合缩放，全屏可编辑曲面、三维点位和坐标范围
+- **MCP**：远程 Streamable HTTP 与 SSE 服务器，按工具开关；聊天输入框「+」里的 MCP 抽屉显示实时连接状态并一键开关，会话过期自动重连；MCP 工具默认直接执行，不再逐次请求确认
+- **模型内置能力**：OpenAI / Claude / Gemini 原生联网搜索、Gemini URL 上下文、生图模型
+- **多模态**：图片、拍照、PDF / Word / PPT / Excel / EPUB / 代码等文档（本地提取文本）；拍照和相册图片会先进入裁剪器：图片居中留边，拖动边角裁剪、松手后选区自动放大回到中间，支持双指缩放、旋转和自由 / 原图 / 1:1 / 4:3 / 3:4 / 16:9 / 9:16 比例；Android 10 以下通过系统相册兼容入口选择图片
+- **聊天界面**：消息一直延伸到输入框后面，追问建议浮在消息上，输入区只在底部渐隐；模型和思考强度收进输入框的操作行，阅读区域更大；助手参数里的 Temperature / Top P 附带用途说明
+- **对话管理**：历史页支持置顶、侧滑删除与撤销、保留置顶并清理其余记录；消息搜索可按当前 / 所有助手筛选，按相关度或时间排序并高亮命中；另有分支、分叉、收藏、上下文压缩、Markdown 导出、本对话用量面板
+- **流式书写**：回复逐字落屏而不是整段跳出，落后的文字会自动追赶，结束时光标收束；中途停止会留下已经到达的内容并标记为「已停止生成」，可一键继续，下一轮对话仍把它当作上下文
+- **后台会话**：发送后立即进入侧栏，可切换到新对话而不打断旧回复；生成中的标题旁显示进度，Android 后台持续流式生成并在完成时按通知设置提醒；相册多选图片会逐张进入裁剪器，Android 回收进程后可以恢复尚未发送的相册和拍照附件。iOS 后台运行时间由系统限制。
+- **助手**：系统提示词变量、开场白、预设消息、消息模板、正则替换、世界书与模式注入、独立参数与背景图；导入 SillyTavern 角色卡（PNG / JSON，V1-V3）与世界书
+- **扩展抽屉**：在聊天里直接插入快捷短语、开关模式与世界书、查看和删除记忆
+- **扫码传输配置**：备份与恢复页把供应商、模型、助手、MCP、世界书等配置分成多张循环播放的二维码，另一台设备扫码即可导入，可选是否包含密钥
+- **其它**：翻译、绘图、朗读、标题与追问建议自动生成、用量统计、WebDAV 与本地备份、浅色 / 深色 / 六种主题色（背景、文字、卡片、渐变与通知都随主题色变化）、中英双语、平板双栏布局
+
+### 安全与隐私
+
+- API Key、WebDAV 密码、MCP 请求头存放在系统钥匙串 / Android Keystore，不写入普通文件
+- 所有数据只在 App 沙盒内；没有统计和广告；只会请求你配置的地址
+- 默认只允许 HTTPS，明文 HTTP 仅限本机回环地址（本地模型）
+- 权限按需申请：相机、相册、通知都只在你使用对应功能时询问
+
+### 安装
+
+到 [Releases](https://github.com/mizaawa/mewhub/releases) 下载：
+
+- **Android**：大多数手机选 `arm64-v8a.apk`，不确定就选 `universal.apk`
+- **iOS**：`ios-unsigned.ipa` 未签名，用 AltStore / SideStore / Sideloadly / TrollStore 安装（会用你自己的 Apple ID 重新签名）
+
+### 开发
+
+```bash
+flutter pub get
+flutter analyze
+flutter test
+flutter run
+```
+
+需要 Flutter 3.47+ / Dart 3.13+。Android 最低 7.0（API 24），iOS 最低 15.0。
+
+### 发布新版本
+
+1. 修改 `pubspec.yaml` 的 `version`
+2. 打标签并推送：`git tag v1.2.3 && git push origin v1.2.3`
+3. `Release` 工作流等待 Android 和 iOS 都构建成功，再把 APK、AAB、未签名 IPA 和两份 SHA-256 校验文件一起上传到草稿。全部校验通过后才公开版本。
+
+若有一端失败，在 Actions 中重跑失败的任务即可；不要在 Releases 页面提前公开草稿。已公开版本的附件不会被工作流覆盖。
+
+首次发布前，在仓库 Settings → Secrets and variables → Actions 中配置以下四个 Secrets。CI 主分支 APK 和 Release APK/AAB 都使用同一份 JKS；缺少任意一项时构建会失败，避免发布无法覆盖升级的临时签名包。
+
+| Secret | 说明 |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | JKS 文件的单行 Base64；PowerShell：`[Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path .\release.jks)))` |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore 密码 |
+| `ANDROID_KEY_ALIAS` | key 别名 |
+| `ANDROID_KEY_PASSWORD` | key 密码 |
+
+请保管并备份原始 JKS 和密码，以后的版本继续使用同一密钥；如果已有正式签名密钥，应沿用原密钥。此前用临时 debug 签名安装的 APK 切换到固定签名时仍需卸载一次，此后同签名且 `versionCode` 不低于已安装版本即可覆盖升级。PR 只检查 debug 签名构建，不上传可安装的 APK。
+
+如果还没有 JKS，可执行一次 `keytool -genkeypair -keystore release.jks -storetype JKS -alias mewhub -keyalg RSA -keysize 4096 -validity 10000` 创建，再将同一文件和密码保存为上面的 Secrets。CI 和 Release 使用各自的构建号；跨两种渠道安装时还需确认新 APK 的 `versionCode` 更高。
+
+---
+
+## English
+
+MewHub is a multi-provider AI chat client inspired by [RikkaHub](https://github.com/rikkahub/rikkahub), rebuilt in Flutter for Android and iOS, with a milk-white theme and motion throughout.
+
+**Highlights:** native OpenAI Chat / OpenAI Responses / Anthropic / Gemini streaming; any compatible gateway with custom URLs, headers, bodies and key rotation; reasoning controls mapped per vendor; agent tool loop with web search, page reading, memory and MCP, with in-chat drawers to toggle MCP servers, modes, lorebooks and quick messages; an opt-in local coordinate plotting tool with 2D curves, interactive 3D surfaces (one-finger orbit, two-finger pan/zoom), points, segments, on-device rendering and full-screen editing; vision and document attachments; a RikkaHub-style cropper for camera and gallery photos (drag the corners, pinch to zoom, rotate, preset ratios); Android gallery selection with compatibility support for older devices; a chat list that runs behind a compact composer with model and reasoning controls inside the input; parallel background chats with Android streaming and completion notifications; a conversation history page with pinning, swipe-to-delete and undo, plus message search scoped by assistant with relevance/time sorting and highlighted matches; message branches, forks, favorites and context compression; replies that write themselves in character by character; editing a sent message always applies and regenerates, and a stopped reply keeps the text that arrived as context; assistants with lorebooks, regexes and SillyTavern card import; translation, image generation, TTS, usage stats, WebDAV backup and multi-code QR transfer of the whole configuration; light/dark themes with six accents that tint the whole interface, Chinese and English.
+
+**Privacy:** keys live in the iOS Keychain / Android Keystore; data stays in the app sandbox; no analytics; requests go only to endpoints you configure.
+
+**Install:** grab an APK (Android) or the unsigned IPA (iOS, sideload with AltStore/SideStore) from [Releases](https://github.com/mizaawa/mewhub/releases).
+
+**Build:** `flutter pub get && flutter test && flutter run` (Flutter 3.47+). Push a `vX.Y.Z` tag to release. The workflow publishes only after the Android packages, unsigned iOS IPA and both checksum files have been uploaded and verified.
+
+## License
+
+[AGPL-3.0](LICENSE). MewHub's feature set follows RikkaHub (AGPL-3.0); the code here is an independent Flutter implementation.
