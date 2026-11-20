@@ -458,6 +458,13 @@ class _AssistantEditPageState extends State<AssistantEditPage> with SingleTicker
               onChanged: (v) => _save(_a.copyWith(enableWebSearch: v)),
             ),
             SwitchListTile(
+              secondary: const IconBadge(Icons.candlestick_chart_rounded),
+              title: Text(t('股票分析', 'Stock analysis')),
+              subtitle: Text(t('K 线、缠论、实时行情、多级别对照', 'K-lines, Chan theory, quotes, multi-timeframe')),
+              value: _a.enableStockTools,
+              onChanged: (v) => _save(_a.copyWith(enableStockTools: v)),
+            ),
+            SwitchListTile(
               secondary: const IconBadge(Icons.bookmark_added_outlined),
               title: Text(t('长期记忆', 'Long-term memory')),
               subtitle: Text(t('模型可以记住你的偏好', 'The model can remember your preferences')),

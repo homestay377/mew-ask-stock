@@ -308,6 +308,7 @@ class Assistant {
     this.useGlobalMemory = false,
     this.enableRecentChats = false,
     this.enableWebSearch = false,
+    this.enableStockTools = false,
     this.localTools = const {LocalTool.timeInfo},
     this.mcpServerIds = const {},
     this.lorebookIds = const {},
@@ -344,6 +345,9 @@ class Assistant {
   final bool useGlobalMemory;
   final bool enableRecentChats;
   final bool enableWebSearch;
+
+  /// 是否开放股票分析工具（K 线 / 缠论 / 实时行情 / 多级别）。
+  final bool enableStockTools;
   final Set<LocalTool> localTools;
   final Set<String> mcpServerIds;
   final Set<String> lorebookIds;
@@ -381,6 +385,7 @@ class Assistant {
     bool? useGlobalMemory,
     bool? enableRecentChats,
     bool? enableWebSearch,
+    bool? enableStockTools,
     Set<LocalTool>? localTools,
     Set<String>? mcpServerIds,
     Set<String>? lorebookIds,
@@ -413,6 +418,7 @@ class Assistant {
     useGlobalMemory: useGlobalMemory ?? this.useGlobalMemory,
     enableRecentChats: enableRecentChats ?? this.enableRecentChats,
     enableWebSearch: enableWebSearch ?? this.enableWebSearch,
+    enableStockTools: enableStockTools ?? this.enableStockTools,
     localTools: localTools ?? this.localTools,
     mcpServerIds: mcpServerIds ?? this.mcpServerIds,
     lorebookIds: lorebookIds ?? this.lorebookIds,
@@ -446,6 +452,7 @@ class Assistant {
     useGlobalMemory: asBool(j['useGlobalMemory']),
     enableRecentChats: asBool(j['enableRecentChats']),
     enableWebSearch: asBool(j['enableWebSearch']),
+    enableStockTools: asBool(j['enableStockTools']),
     localTools: j['localTools'] == null ? {LocalTool.timeInfo} : enumSet(LocalTool.values, j['localTools']),
     mcpServerIds: asList(j['mcpServerIds']).map((e) => e.toString()).toSet(),
     lorebookIds: asList(j['lorebookIds']).map((e) => e.toString()).toSet(),
@@ -479,6 +486,7 @@ class Assistant {
     'useGlobalMemory': useGlobalMemory,
     'enableRecentChats': enableRecentChats,
     'enableWebSearch': enableWebSearch,
+    'enableStockTools': enableStockTools,
     'localTools': localTools.map((e) => e.name).toList(),
     'mcpServerIds': mcpServerIds.toList(),
     'lorebookIds': lorebookIds.toList(),

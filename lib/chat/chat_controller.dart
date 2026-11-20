@@ -21,6 +21,7 @@ import '../state/settings_store.dart';
 import '../tools/app_tools.dart';
 import '../tools/local_tools.dart';
 import '../tools/mcp.dart';
+import '../tools/stock_tools.dart';
 import '../tools/tool.dart';
 import 'accumulator.dart';
 import 'auto_compression.dart';
@@ -249,6 +250,8 @@ class ChatController extends ChangeNotifier {
       ...buildLocalTools(a.localTools, latex: s.display.latex),
       if (a.enableWebSearch && !_useBuiltInSearch(model)) ...buildSearchTools(s),
       if (a.enableMemory) ...buildMemoryTools(db, assistantId: a.useGlobalMemory ? null : a.id),
+      // 股票分析：数据由 App 自己直取，不依赖任何界面状态。
+      ...buildStockTools(enabled: a.enableStockTools),
     ];
     final servers = [
       for (final m in s.mcpServers)
