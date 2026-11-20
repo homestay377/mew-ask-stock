@@ -44,12 +44,23 @@ final RegExp _modifierRe = RegExp(
 );
 
 const Set<String> _decorative = {
-  'STICKLINE', 'DRAWTEXT', 'DRAWICON', 'POLYLINE', 'DRAWBAND', 'DRAWTEXT_FIX', 'DRAWKLINE',
+  'STICKLINE',
+  'DRAWTEXT',
+  'DRAWICON',
+  'POLYLINE',
+  'DRAWBAND',
+  'DRAWTEXT_FIX',
+  'DRAWKLINE',
 };
 
 const Map<String, String> _alias = {
-  'CLOSE': 'C', 'OPEN': 'O', 'HIGH': 'H', 'LOW': 'L',
-  'VOL': 'V', 'VOLUME': 'V', 'AMOUNT': 'AMT',
+  'CLOSE': 'C',
+  'OPEN': 'O',
+  'HIGH': 'H',
+  'LOW': 'L',
+  'VOL': 'V',
+  'VOLUME': 'V',
+  'AMOUNT': 'AMT',
 };
 
 const Set<String> _relOps = {'>', '<', '>=', '<=', '=', '==', '!=', '<>'};
@@ -225,7 +236,9 @@ class _Parser {
     var a = _pMul();
     while (true) {
       final tk = peek();
-      if (tk != null && tk.kind == _Kind.op && (tk.text == '+' || tk.text == '-')) {
+      if (tk != null &&
+          tk.kind == _Kind.op &&
+          (tk.text == '+' || tk.text == '-')) {
         eat();
         a = _Node(_NK.bin, text: tk.text, args: [a, _pMul()]);
       } else {
@@ -239,7 +252,9 @@ class _Parser {
     var a = _pUnary();
     while (true) {
       final tk = peek();
-      if (tk != null && tk.kind == _Kind.op && (tk.text == '*' || tk.text == '/')) {
+      if (tk != null &&
+          tk.kind == _Kind.op &&
+          (tk.text == '*' || tk.text == '/')) {
         eat();
         a = _Node(_NK.bin, text: tk.text, args: [a, _pUnary()]);
       } else {
@@ -251,7 +266,9 @@ class _Parser {
 
   _Node _pUnary() {
     final tk = peek();
-    if (tk != null && tk.kind == _Kind.op && (tk.text == '-' || tk.text == '+')) {
+    if (tk != null &&
+        tk.kind == _Kind.op &&
+        (tk.text == '-' || tk.text == '+')) {
       eat();
       return _Node(_NK.unary, text: tk.text, args: [_pUnary()]);
     }
@@ -487,9 +504,11 @@ Float64List _cross(Float64List a, Float64List b) {
   final len = a.length;
   final ra = _refScalar(a, 1);
   final rb = _refScalar(b, 1);
-  return Float64List.fromList(List<double>.generate(len, (i) {
-    return (a[i] > b[i] && ra[i] <= rb[i]) ? 1.0 : 0.0;
-  }));
+  return Float64List.fromList(
+    List<double>.generate(len, (i) {
+      return (a[i] > b[i] && ra[i] <= rb[i]) ? 1.0 : 0.0;
+    }),
+  );
 }
 
 /// VALUEWHEN(C,X)：C 成立则刷新 cur，输出 cur。
@@ -639,7 +658,9 @@ Float64List _evalNode(_Node nd, _Ctx ctx) {
       final v = ctx.get(nd.text);
       if (v == null) return _nanArr(n);
       if (v.length == n) return v;
-      return Float64List.fromList(List<double>.generate(n, (i) => i < v.length ? v[i] : double.nan));
+      return Float64List.fromList(
+        List<double>.generate(n, (i) => i < v.length ? v[i] : double.nan),
+      );
     case _NK.unary:
       final x = _evalNode(nd.args[0], ctx);
       switch (nd.text) {
@@ -649,7 +670,9 @@ Float64List _evalNode(_Node nd, _Ctx ctx) {
           return x;
         default:
           final t = _truth(x);
-          return Float64List.fromList(List<double>.generate(n, (i) => t[i] ? 0.0 : 1.0));
+          return Float64List.fromList(
+            List<double>.generate(n, (i) => t[i] ? 0.0 : 1.0),
+          );
       }
     case _NK.bin:
       return _evalBin(nd, ctx);
@@ -779,7 +802,9 @@ Float64List _callFn(String name, List<_Node> args, _Ctx ctx) {
     case 'IF':
       if (a.length < 3) return _nanArr(n);
       final c = _truth(a[0]);
-      return Float64List.fromList(List<double>.generate(n, (i) => c[i] ? a[1][i] : a[2][i]));
+      return Float64List.fromList(
+        List<double>.generate(n, (i) => c[i] ? a[1][i] : a[2][i]),
+      );
     case 'REF':
       return _ref(a0, a1);
     case 'REFX':
@@ -822,33 +847,43 @@ Float64List _callFn(String name, List<_Node> args, _Ctx ctx) {
         // ★ N 必须按标量传：包成逐根数组时 count 会取到越界 0，EVERY 恒为 0。
         final k = _numArg(a1).truncateToDouble();
         final cnt = _countImpl(_truth(a0), (_) => k);
-        return Float64List.fromList(List<double>.generate(n, (i) => cnt[i] >= k ? 1.0 : 0.0));
+        return Float64List.fromList(
+          List<double>.generate(n, (i) => cnt[i] >= k ? 1.0 : 0.0),
+        );
       }
     case 'NOT':
       {
         final t = _truth(a0);
-        return Float64List.fromList(List<double>.generate(n, (i) => t[i] ? 0.0 : 1.0));
+        return Float64List.fromList(
+          List<double>.generate(n, (i) => t[i] ? 0.0 : 1.0),
+        );
       }
     case 'ABS':
       return Float64List.fromList(List<double>.generate(n, (i) => a0[i].abs()));
     case 'MAX':
       if (a.length < 2) return _nanArr(n);
-      return Float64List.fromList(List<double>.generate(n, (i) {
-        final x = a0[i];
-        final y = a[1][i];
-        if (x.isNaN || y.isNaN) return double.nan;
-        return x >= y ? x : y;
-      }));
+      return Float64List.fromList(
+        List<double>.generate(n, (i) {
+          final x = a0[i];
+          final y = a[1][i];
+          if (x.isNaN || y.isNaN) return double.nan;
+          return x >= y ? x : y;
+        }),
+      );
     case 'MIN':
       if (a.length < 2) return _nanArr(n);
-      return Float64List.fromList(List<double>.generate(n, (i) {
-        final x = a0[i];
-        final y = a[1][i];
-        if (x.isNaN || y.isNaN) return double.nan;
-        return x <= y ? x : y;
-      }));
+      return Float64List.fromList(
+        List<double>.generate(n, (i) {
+          final x = a0[i];
+          final y = a[1][i];
+          if (x.isNaN || y.isNaN) return double.nan;
+          return x <= y ? x : y;
+        }),
+      );
     case 'SQRT':
-      return Float64List.fromList(List<double>.generate(n, (i) => math.sqrt(a0[i].abs())));
+      return Float64List.fromList(
+        List<double>.generate(n, (i) => math.sqrt(a0[i].abs())),
+      );
     case 'CONST':
       {
         final v = _numArg(a0);
@@ -898,7 +933,9 @@ Float64List _drawLine(List<Float64List> a, int n) {
     final v2 = p2[i2];
     if (_isFiniteNum(v1) && _isFiniteNum(v2)) {
       for (var dk = i1; dk <= i2; dk++) {
-        final ratio = i2 == i1 ? 0.0 : (dk - i1).toDouble() / (i2 - i1).toDouble();
+        final ratio = i2 == i1
+            ? 0.0
+            : (dk - i1).toDouble() / (i2 - i1).toDouble();
         out[dk] = v1 + (v2 - v1) * ratio;
       }
     }
@@ -1009,19 +1046,23 @@ FormulaResult runFormula(String text, Map<String, Float64List> ohlcv) {
         if (v != ',' && v != ')') stray.add(v);
       }
       if (stray.isNotEmpty) {
-        errors.add(FormulaError(
-          li + 1,
-          line.length > 80 ? line.substring(0, 80) : line,
-          '语句未完整消费，剩余 token: ${stray.take(8).join(' ')}',
-        ));
+        errors.add(
+          FormulaError(
+            li + 1,
+            line.length > 80 ? line.substring(0, 80) : line,
+            '语句未完整消费，剩余 token: ${stray.take(8).join(' ')}',
+          ),
+        );
       }
       data[name.toUpperCase()] = _evalNode(ast, ctx);
     } catch (e) {
-      errors.add(FormulaError(
-        li + 1,
-        line.length > 80 ? line.substring(0, 80) : line,
-        e.toString(),
-      ));
+      errors.add(
+        FormulaError(
+          li + 1,
+          line.length > 80 ? line.substring(0, 80) : line,
+          e.toString(),
+        ),
+      );
     }
   }
 

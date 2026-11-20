@@ -60,7 +60,14 @@ class PenPoint {
 
 /// 中枢框。
 class ChanBox {
-  ChanBox({required this.tag, required this.s, required this.e, required this.zg, required this.zd, required this.mid});
+  ChanBox({
+    required this.tag,
+    required this.s,
+    required this.e,
+    required this.zg,
+    required this.zd,
+    required this.mid,
+  });
 
   /// `红` / `绿`
   final String tag;
@@ -230,7 +237,8 @@ class Chanlun {
   /// 红/绿两族常对同一段给出同一个中枢：时间+价格都重叠就合并，留跨度长的那个。
   /// 不合并会画出两个几乎重合的框。
   static List<ChanBox> mergeBoxes(List<ChanBox> boxes) {
-    final bs = [...boxes]..sort((x, y) {
+    final bs = [...boxes]
+      ..sort((x, y) {
         if (x.s != y.s) return x.s - y.s;
         return (y.e - y.s) - (x.e - x.s);
       });
@@ -241,7 +249,9 @@ class Chanlun {
         final u = out[j];
         if ((u.e < b.e ? u.e : b.e) - (u.s > b.s ? u.s : b.s) <= 0) continue;
         final ov = (u.zg < b.zg ? u.zg : b.zg) - (u.zd > b.zd ? u.zd : b.zd);
-        final span = (u.zg - u.zd) < (b.zg - b.zd) ? (u.zg - u.zd) : (b.zg - b.zd);
+        final span = (u.zg - u.zd) < (b.zg - b.zd)
+            ? (u.zg - u.zd)
+            : (b.zg - b.zd);
         if (span > 0 && ov > 0.6 * span) {
           hit = j;
           break;
@@ -312,14 +322,16 @@ class Chanlun {
 
         final zg = topSeq[s];
         final zd = botSeq[s];
-        res.add(ChanBox(
-          tag: tag,
-          s: s,
-          e: end,
-          zg: zg,
-          zd: zd,
-          mid: midSeq != null ? midSeq[s] : (zg + zd) / 2,
-        ));
+        res.add(
+          ChanBox(
+            tag: tag,
+            s: s,
+            e: end,
+            zg: zg,
+            zd: zd,
+            mid: midSeq != null ? midSeq[s] : (zg + zd) / 2,
+          ),
+        );
       }
     }
     return res;
@@ -331,8 +343,10 @@ class Chanlun {
     final a70 = d['X_70'];
     final a71 = d['X_71'];
     for (var i = s0; i < n; i++) {
-      if (a70 != null && a70[i] > 0) pts.add(PenPoint(idx: i - s0, price: a70[i], type: '底'));
-      if (a71 != null && a71[i] > 0) pts.add(PenPoint(idx: i - s0, price: a71[i], type: '顶'));
+      if (a70 != null && a70[i] > 0)
+        pts.add(PenPoint(idx: i - s0, price: a70[i], type: '底'));
+      if (a71 != null && a71[i] > 0)
+        pts.add(PenPoint(idx: i - s0, price: a71[i], type: '顶'));
     }
     pts.sort((a, b) => a.idx - b.idx);
     return pts;
@@ -389,7 +403,9 @@ class Chanlun {
     int load = 0,
     int viewStart = 0,
   }) {
-    final b = (load > 0 && bars.length > load) ? bars.sublist(bars.length - load) : bars;
+    final b = (load > 0 && bars.length > load)
+        ? bars.sublist(bars.length - load)
+        : bars;
     final n = b.length;
     if (n == 0) {
       return ChanResult(
@@ -481,7 +497,9 @@ class Chanlun {
       if (cur.dir != prev.dir) continue;
       final up = cur.dir == 'up';
       // 必须创新极值：趋势背驰的定义是「新高/新低但力度不足」
-      final createsExtreme = up ? cur.toPrice > prev.toPrice : cur.toPrice < prev.toPrice;
+      final createsExtreme = up
+          ? cur.toPrice > prev.toPrice
+          : cur.toPrice < prev.toPrice;
       if (!createsExtreme) continue;
       final a1 = segArea(prev.from, prev.to, up);
       final a2 = segArea(cur.from, cur.to, up);
@@ -489,25 +507,29 @@ class Chanlun {
       final lv = boxes.length >= 2 ? '趋势' : '笔';
       if (a2 <= _epsArea) {
         // 分子归零 = 这一段完全没出现同向柱，价格却创新极值 → 极强背驰
-        signals.add(ChanSignal(
-          idx: cur.to,
-          type: up ? 'sell' : 'buy',
-          label: '${up ? '顶' : '底'}背驰(极强)',
-          level: '极强',
-          price: cur.toPrice,
-          strength: '1.00',
-        ));
+        signals.add(
+          ChanSignal(
+            idx: cur.to,
+            type: up ? 'sell' : 'buy',
+            label: '${up ? '顶' : '底'}背驰(极强)',
+            level: '极强',
+            price: cur.toPrice,
+            strength: '1.00',
+          ),
+        );
         continue;
       }
       if (a2 < a1 * _divRatio) {
-        signals.add(ChanSignal(
-          idx: cur.to,
-          type: up ? 'sell' : 'buy',
-          label: '${up ? '顶' : '底'}背驰($lv)',
-          level: lv,
-          price: cur.toPrice,
-          strength: _fmt2(1 - a2 / a1),
-        ));
+        signals.add(
+          ChanSignal(
+            idx: cur.to,
+            type: up ? 'sell' : 'buy',
+            label: '${up ? '顶' : '底'}背驰($lv)',
+            level: lv,
+            price: cur.toPrice,
+            strength: _fmt2(1 - a2 / a1),
+          ),
+        );
       }
     }
 
@@ -518,17 +540,30 @@ class Chanlun {
     //   卖点对称
     final points = <ChanPoint>[];
 
-    void pushPoint(int idx, String kind, double price, String why, ChanBox? box) {
-      points.add(ChanPoint(
-        idx: idx,
-        type: kind.contains('买') ? 'buy' : 'sell',
-        label: kind,
-        price: price,
-        reason: why,
-        box: box == null
-            ? null
-            : BoxRef(box.s, box.e, double.parse(_fmt2(box.zg)), double.parse(_fmt2(box.zd))),
-      ));
+    void pushPoint(
+      int idx,
+      String kind,
+      double price,
+      String why,
+      ChanBox? box,
+    ) {
+      points.add(
+        ChanPoint(
+          idx: idx,
+          type: kind.contains('买') ? 'buy' : 'sell',
+          label: kind,
+          price: price,
+          reason: why,
+          box: box == null
+              ? null
+              : BoxRef(
+                  box.s,
+                  box.e,
+                  double.parse(_fmt2(box.zg)),
+                  double.parse(_fmt2(box.zd)),
+                ),
+        ),
+      );
     }
 
     for (final sg in signals) {
@@ -617,8 +652,9 @@ class Chanlun {
 
     // 按时间排序、去重（同 idx 同 label 只留一个）
     final seen = <String>{};
-    final deduped = points.where((p) => seen.add('${p.idx}|${p.label}')).toList()
-      ..sort((a, b) => a.idx - b.idx);
+    final deduped =
+        points.where((p) => seen.add('${p.idx}|${p.label}')).toList()
+          ..sort((a, b) => a.idx - b.idx);
 
     final lastBox = boxes.isEmpty ? null : boxes.last;
     String? boxPosition;

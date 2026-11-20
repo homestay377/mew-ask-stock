@@ -18,7 +18,8 @@ void main() {
   setUpAll(() {
     final goldenFile = File('test/fixtures/chan/golden_300274.json');
     final formulaFile = File('test/fixtures/chan/chan_formula.txt');
-    final golden = jsonDecode(goldenFile.readAsStringSync()) as Map<String, dynamic>;
+    final golden =
+        jsonDecode(goldenFile.readAsStringSync()) as Map<String, dynamic>;
     formula = formulaFile.readAsStringSync();
     bars = [
       for (final b in golden['bars'] as List)
@@ -70,7 +71,11 @@ void main() {
   test('笔段方向交替，顶底不连续同向', () {
     final r = Chanlun.analyze(bars, formula);
     for (var i = 1; i < r.pens.length; i++) {
-      expect(r.pens[i].type, isNot(r.pens[i - 1].type), reason: '第 $i 个笔与前一个同向');
+      expect(
+        r.pens[i].type,
+        isNot(r.pens[i - 1].type),
+        reason: '第 $i 个笔与前一个同向',
+      );
     }
     for (final seg in r.bi) {
       expect(seg.dir, anyOf('up', 'down'));
@@ -97,8 +102,11 @@ void main() {
     final r = Chanlun.analyze(short, formula);
     final full = Chanlun.analyze(bars, formula);
     expect(full.boxes.length, 4);
-    expect(r.boxes.length, greaterThan(full.boxes.length),
-        reason: '窗口变短反而更少中枢，说明取数长度的结论需要复核');
+    expect(
+      r.boxes.length,
+      greaterThan(full.boxes.length),
+      reason: '窗口变短反而更少中枢，说明取数长度的结论需要复核',
+    );
   });
 
   test('viewStart 只裁剪显示范围，不改变计算结果', () {
