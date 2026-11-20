@@ -81,6 +81,14 @@ const _ua = 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gec
 /// 缠论取数建议根数：实测 400 根起结果收敛，腾讯日线最多约 640 根。
 const int chanBarCount = 640;
 
+/// 全局共享的数据源。
+///
+/// 面板、联动的搜索、AI 工具都走这一个实例——缓存和 TCP 连接才能真正复用。
+StockSource? _shared;
+
+/// 取全局数据源。
+StockSource get sharedStockSource => _shared ??= StockSource();
+
 /// A 股 / 指数 / 境外品种的行情访问。
 class StockSource {
   StockSource({HttpClient? client})
@@ -406,9 +414,10 @@ class StockSource {
     if (points.isEmpty) throw StockDataError('分时数据解析后为空');
 
     // 昨收：优先用快照里的前收，拿不到就用分时第一根的价格兜底。
+    // 快照走 quoteCache（60 秒），避免每次切到分时都多打一次请求。
     var prevClose = points.first.price;
     try {
-      final q = await quote(code);
+      final q = await quoteCached(code);
       if (q.prevClose > 0) prevClose = q.prevClose;
     } catch (_) {
       // 拿不到就用首根，至少 0 轴位置不会崩
@@ -459,6 +468,36 @@ class StockSource {
     _cache[key] = _CacheEntry(s, DateTime.now());
   }
 
+  final Map<String, _QuoteEntry> _quoteCache = {};
+
+  final Map<String, _MinuteEntry> _minuteCache = {};
+
+  /// 带缓存的分时。分时窗口收紧到 15 秒（盘中变化快）。
+  Future<MinuteSeries> minuteCached(String symbol) {
+    final key = normalize(symbol);
+    final hit = _minuteCache[key];
+    if (hit != null && DateTime.now().difference(hit.at).inMilliseconds < _minuteFreshMs) {
+      return Future.value(hit.series);
+    }
+    return minute(key).then((m) {
+      _minuteCache[key] = _MinuteEntry(m, DateTime.now());
+      return m;
+    });
+  }
+
+  /// 带缓存的实时快照。行情卡与分时共用，避免重复请求。
+  Future<Quote> quoteCached(String symbol) {
+    final key = normalize(symbol);
+    final hit = _quoteCache[key];
+    if (hit != null && DateTime.now().difference(hit.at).inMilliseconds < _freshMs) {
+      return Future.value(hit.quote);
+    }
+    return quote(key).then((q) {
+      _quoteCache[key] = _QuoteEntry(q, DateTime.now());
+      return q;
+    });
+  }
+
   /// 缓存是否已过期到需要后台刷新（10 分钟内不算过期）。
   bool isStale(String symbol, {String period = 'day', int count = chanBarCount}) {
     final hit = _cache['${normalize(symbol)}|$period|$count'];
@@ -495,5 +534,19 @@ class _CacheEntry {
   _CacheEntry(this.series, this.at);
 
   final KlineSeries? series;
+  final DateTime at;
+}
+
+class _QuoteEntry {
+  _QuoteEntry(this.quote, this.at);
+
+  final Quote quote;
+  final DateTime at;
+}
+
+class _MinuteEntry {
+  _MinuteEntry(this.series, this.at);
+
+  final MinuteSeries series;
   final DateTime at;
 }

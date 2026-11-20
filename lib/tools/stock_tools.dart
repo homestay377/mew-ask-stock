@@ -8,6 +8,8 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart' show rootBundle;
 
+import '../stock/chart_shapes.dart';
+import '../stock/shape_store.dart';
 import '../stock/stock_analyzer.dart';
 import '../stock/stock_source.dart';
 import 'tool.dart';
@@ -30,7 +32,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
   if (!enabled) return const [];
 
   // 整个会话共用一个数据源，复用 TCP 连接。
-  final source = StockSource();
+  // 与面板共用同一实例：切周期、AI 取数都能命中缓存。
+  final source = sharedStockSource;
 
   Future<StockAnalyzer> analyzer() async => StockAnalyzer(source: source, formula: await _formula());
 
@@ -199,6 +202,119 @@ List<AppTool> buildStockTools({bool enabled = true}) {
             }
           }
           return jsonEncode({'symbol': symbol, 'levels': out});
+        } catch (e) {
+          return jsonEncode({'error': '$e'});
+        }
+      },
+    ),
+    AppTool(
+      name: 'chart_annotate',
+      displayName: '标注',
+      description:
+          '在 K 线图上画标注：水平线（支撑/压力/止损价）、趋势线、矩形区间、文字、箭头。'
+          '当你要给出具体价位（支撑位、压力位、止损价、目标价）时用它画出来，'
+          '比只在文字里报数字清楚得多。多次调用会累加。',
+      parameters: objectSchema(
+        {
+          'symbol': strProp('股票代码，如 300274'),
+          'period': strProp('周期：day/week/month/m60/m30/m15，默认 day'),
+          'shapes': {
+            'type': 'array',
+            'description': '要画的图元列表',
+            'items': {
+              'type': 'object',
+              'properties': {
+                'kind': strProp('类型', enumValues: ['hline', 'trendline', 'rect', 'text', 'arrow', 'dot']),
+                'index': intProp('起始 K 线索引（0=最早，-1=最新）'),
+                'price': {'type': 'number', 'description': '起始价格'},
+                'index2': intProp('终点 K 线索引（两点图元用）'),
+                'price2': {'type': 'number', 'description': '终点价格（两点图元用）'},
+                'text': strProp('文字内容（text 类型必填）'),
+                'color': strProp('颜色含义', enumValues: ['up', 'down', 'resist', 'support', 'stop', 'target', 'accent']),
+              },
+              'required': ['kind'],
+            },
+          },
+        },
+        required: ['symbol', 'shapes'],
+      ),
+      promptHint: '画完要说明每条线代表什么价位、为什么在这个位置，不要只报坐标。',
+      execute: (args) async {
+        try {
+          final symbol = '${args['symbol'] ?? ''}'.trim();
+          if (symbol.isEmpty) return jsonEncode({'error': '缺少 symbol'});
+          final period = '${args['period'] ?? 'day'}';
+          final raw = args['shapes'];
+          if (raw is! List || raw.isEmpty) return jsonEncode({'error': 'shapes 不能为空'});
+
+          // 用真实 K 线确定有效索引范围，越界的坐标直接拒绝（避免画出乱线）
+          final series = await source.kline(symbol, period: period);
+          final total = series.bars.length;
+          final existing = await ShapeStore.instance.load(series.symbol, period);
+
+          int resolveIndex(Object? v, int fallback) {
+            if (v is! num) return fallback;
+            final i = v.toInt();
+            if (i < 0) return (total + i).clamp(0, total - 1);
+            return i.clamp(0, total - 1);
+          }
+
+          final added = <ChartShape>[];
+          final rejected = <String>[];
+          for (final item in raw) {
+            if (item is! Map) continue;
+            final kindName = '${item['kind'] ?? ''}';
+            final kind = shapeKindFromName(kindName);
+            if (kind == null) {
+              rejected.add('未知类型 $kindName');
+              continue;
+            }
+            final price = (item['price'] as num?)?.toDouble();
+            if (price == null) {
+              rejected.add('$kindName 缺少 price');
+              continue;
+            }
+            final idx = resolveIndex(item['index'], total - 1);
+            final needTwo =
+                kind == ShapeKind.trendline ||
+                kind == ShapeKind.rect ||
+                kind == ShapeKind.arrow ||
+                kind == ShapeKind.ray;
+            if (needTwo && (item['index2'] == null || item['price2'] == null)) {
+              rejected.add('$kindName 需要 index2 和 price2');
+              continue;
+            }
+            added.add(
+              ChartShape(
+                kind: kind,
+                i1: idx,
+                p1: price,
+                i2: needTwo ? resolveIndex(item['index2'], idx) : null,
+                p2: needTwo ? (item['price2'] as num).toDouble() : null,
+                text: item['text']?.toString(),
+                color: shapeColorFromName('${item['color'] ?? 'accent'}'),
+              ),
+            );
+          }
+
+          if (added.isEmpty) {
+            return jsonEncode({'error': '没有可画的图元', 'rejected': rejected});
+          }
+
+          final next = [...existing, ...added];
+          await ShapeStore.instance.save(series.symbol, period, next);
+
+          return jsonEncode({
+            'ok': true,
+            'symbol': series.symbol,
+            'name': series.name,
+            'period': period,
+            'bars': total,
+            'added': added.length,
+            'total_shapes': next.length,
+            if (rejected.isNotEmpty) 'rejected': rejected,
+            'note': '已画到图上，用户切到该股该周期即可看到',
+          });
         } catch (e) {
           return jsonEncode({'error': '$e'});
         }

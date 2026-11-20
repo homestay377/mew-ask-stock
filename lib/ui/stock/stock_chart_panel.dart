@@ -87,10 +87,23 @@ class StockPanelState extends ChangeNotifier {
 
   void toggle() => _expanded ? collapse() : expand();
 
-  void setSymbol(String v) {
+  /// 最近一次解析到的股票名，联动切股时有值。
+  String? _name;
+  String? get name => _name;
+
+  /// 联动用：确保面板展开（幂等）。
+  void ensureExpanded() {
+    if (_expanded) return;
+    _expanded = true;
+    notifyListeners();
+  }
+
+  void setSymbol(String v, {String? name}) {
     final s = v.trim();
-    if (s.isEmpty || s == _symbol) return;
+    if (s.isEmpty) return;
+    if (s == _symbol && name == null) return;
     _symbol = s;
+    if (name != null) _name = name;
     notifyListeners();
   }
 
@@ -168,7 +181,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
 
   bool get _isMinute => widget.state.period == 'minute';
 
-  StockSource get _src => widget.source ?? (_ownSource ??= StockSource());
+  StockSource get _src => widget.source ?? (_ownSource ??= sharedStockSource);
 
   @override
   void initState() {
@@ -181,7 +194,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
   @override
   void dispose() {
     widget.state.removeListener(_onStateChanged);
-    _ownSource?.close();
+    // 共享数据源不关：其他面板/工具还在用同一条连接与缓存。
     super.dispose();
   }
 
@@ -218,7 +231,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
     try {
       if (_isMinute) {
         // 分时：独立通道，不算缠论（与 Eta 一致）。
-        final m = await _src.minute(widget.state.symbol);
+        final m = await _src.minuteCached(widget.state.symbol);
         if (!mounted || _lastKey != key) return;
         _viewport.showAll(m.points.length);
         setState(() {
