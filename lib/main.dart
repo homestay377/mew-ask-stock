@@ -11,6 +11,7 @@ import 'data/database.dart';
 import 'state/app_state.dart';
 import 'state/settings_store.dart';
 import 'state/tts.dart';
+import 'ui/stock/stock_chart_panel.dart';
 import 'ui/theme.dart';
 
 Future<void> main() async {
@@ -20,6 +21,9 @@ Future<void> main() async {
   SystemChrome.setSystemUIOverlayStyle(
     mewSystemUiOverlayStyle(WidgetsBinding.instance.platformDispatcher.platformBrightness),
   );
+
+  // 缠论公式原文供 K 线面板与工具共用；面板只画中枢，不跑完整分析。
+  setStockFormulaLoader(() => rootBundle.loadString('assets/stock/chan_formula.txt'));
 
   await AppPaths.init();
   await Attachments.recoverLostChatPhotos();

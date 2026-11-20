@@ -204,7 +204,8 @@ class StockSource {
       // 分钟线：必须 ifzq.gtimg.cn（web.ifzq 会 302 到 web3 超时）
       url = 'https://ifzq.gtimg.cn/appstock/app/kline/mkline?param=$code,$p,,$count';
     } else {
-      url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=$code,$p,,,$count,qfq';
+      // ★ 只能 3 个逗号：param=code,period,,,count,qfq。写成 4 个逗号月线会返回 bad params。
+      url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=$code,$p,,$count,qfq';
     }
 
     final body = await _text(url);
