@@ -24,6 +24,8 @@ Future<void> main() async {
 
   // 缠论公式原文供 K 线面板与工具共用；面板只画中枢，不跑完整分析。
   setStockFormulaLoader(() => rootBundle.loadString('assets/stock/chan_formula.txt'));
+  // 让 AI 的工具能驱动 K 线面板（stock_panel_show）。
+  installStockPanelBridge();
 
   await AppPaths.init();
   await Attachments.recoverLostChatPhotos();

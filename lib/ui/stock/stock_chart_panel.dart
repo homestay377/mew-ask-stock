@@ -19,6 +19,7 @@ import '../../stock/chart_shapes.dart';
 import '../../stock/shape_colors.dart';
 import '../../stock/shape_store.dart';
 import '../../stock/minute.dart';
+import '../../stock/stock_bridge.dart';
 import '../../stock/stock_source.dart';
 import '../../stock/watchlist_store.dart';
 
@@ -65,13 +66,26 @@ class StockPanelState extends ChangeNotifier {
   /// 主图指标开关。MA 默认开。
   final Map<String, bool> mainOn = {'MA': true, 'BOLL': false, 'CHAN': true, 'HOLLOW': false};
 
-  /// 副图指标：互斥，只能选一个。
-  String _subInd = 'VOL';
+  /// 副图指标：可多选，空集表示只显示主图。
+  final Set<String> _subOn = {'VOL'};
 
   String get symbol => _symbol;
   String get period => _period;
   bool get expanded => _expanded;
-  String get subInd => _subInd;
+
+  /// 当前开启的副图指标（按固定顺序返回，避免切换时面板顺序跳动）。
+  List<String> get subInds => [
+    for (final k in subIndKeys)
+      if (_subOn.contains(k)) k,
+  ];
+
+  bool isSubOn(String key) => _subOn.contains(key);
+
+  /// 点一下切换；不选任何副图时面板只留主图。
+  void toggleSub(String key) {
+    if (!_subOn.remove(key)) _subOn.add(key);
+    notifyListeners();
+  }
 
   void expand() {
     if (_expanded) return;
@@ -118,12 +132,6 @@ class StockPanelState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setSub(String key) {
-    if (_subInd == key) return;
-    _subInd = key;
-    notifyListeners();
-  }
-
   bool get showMA => mainOn['MA'] ?? false;
   bool get showBoll => mainOn['BOLL'] ?? false;
   bool get showChan => mainOn['CHAN'] ?? false;
@@ -132,6 +140,25 @@ class StockPanelState extends ChangeNotifier {
 
 /// 全局单例：会话之间共用一个面板。
 final stockPanel = StockPanelState();
+
+/// 把面板接到工具层的桥：模型调用 stock_panel_show 时走这里。
+class _PanelRequest implements StockPanelRequest {
+  @override
+  Future<bool> show(String code, {String? period}) async {
+    stockPanel.ensureExpanded();
+    stockPanel.setSymbol(code);
+    if (period != null && period.isNotEmpty) stockPanel.setPeriod(period);
+    return true;
+  }
+
+  @override
+  bool get visible => stockPanel.expanded;
+}
+
+/// App 启动时调用一次，把真实实现交给工具层。
+void installStockPanelBridge() {
+  installStockPanelRequest(_PanelRequest());
+}
 
 class StockChartPanel extends StatefulWidget {
   const StockChartPanel({super.key, required this.state, this.source, this.onAsk, this.maxHeight = 380});
@@ -170,12 +197,6 @@ class _StockChartPanelState extends State<StockChartPanel> {
 
   /// 当前图的画线。
   List<ChartShape> _shapes = const [];
-
-  /// 正在画的类型；null 表示不在画线模式。
-  ShapeKind? _drawing;
-
-  /// 画两点图元时暂存的起点。
-  (int, double)? _drawAnchor;
 
   final _watch = WatchlistStore.instance;
 
@@ -313,9 +334,6 @@ class _StockChartPanelState extends State<StockChartPanel> {
                 onAskBar: _canAsk ? _askAboutFocus : null,
                 onSearch: _openSearch,
                 onAddToWatch: _addCurrentToWatch,
-                onDraw: _drawing != null ? () => setState(() => _drawing = null) : _pickShapeKind,
-                onClearDraw: _clearShapes,
-                drawActive: _drawing != null,
                 onWatchlist: () => setState(() => _drawerOpen = !_drawerOpen),
                 watchlistActive: _drawerOpen,
               ),
@@ -348,75 +366,6 @@ class _StockChartPanelState extends State<StockChartPanel> {
     final hit = await showStockSearch(context, _src.search);
     if (!mounted || hit == null) return;
     widget.state.setSymbol(hit.fullCode);
-  }
-
-  /// 弹出画线类型菜单。
-  Future<void> _pickShapeKind() async {
-    final kind = await showModalBottomSheet<ShapeKind>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _ShapeKindSheet(),
-    );
-    if (kind == null || !mounted) return;
-    setState(() {
-      _drawing = kind;
-      _drawAnchor = null;
-    });
-  }
-
-  /// 画布上点了一下：单点图元直接落笔，两点图元记录起点。
-  ///
-  /// 价格取该根的收盘价——画的是「第 N 根的这个价」，不是像素位置，
-  /// 所以缩放平移后不会飘。
-  Future<void> _onCanvasTap(int index) async {
-    final kind = _drawing;
-    final s = _series;
-    if (kind == null || s == null || index < 0 || index >= s.bars.length) return;
-    final price = s.bars[index].c;
-
-    if (kind == ShapeKind.hline || kind == ShapeKind.text || kind == ShapeKind.dot) {
-      final shape = ChartShape(kind: kind, i1: index, p1: price, text: kind == ShapeKind.text ? '标注' : null);
-      await _appendShape(shape);
-      return;
-    }
-
-    final anchor = _drawAnchor;
-    if (anchor == null) {
-      setState(() => _drawAnchor = (index, price));
-      return;
-    }
-    await _appendShape(ChartShape(kind: kind, i1: anchor.$1, p1: anchor.$2, i2: index, p2: price));
-  }
-
-  Future<void> _appendShape(ChartShape shape) async {
-    final next = [..._shapes, shape];
-    setState(() {
-      _shapes = next;
-      _drawing = null;
-      _drawAnchor = null;
-    });
-    await ShapeStore.instance.save(widget.state.symbol, widget.state.period, next);
-  }
-
-  /// 清空当前图的画线。
-  Future<void> _clearShapes() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('清空画线', style: TextStyle(fontSize: 15)),
-        content: Text(
-          '这只股票在「${_periodLabels[widget.state.period] ?? widget.state.period}」周期上的画线会被删除。',
-          style: const TextStyle(fontSize: 13),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('清空')),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    await ShapeStore.instance.clear(widget.state.symbol, widget.state.period);
-    if (mounted) setState(() => _shapes = const []);
   }
 
   /// 把当前股票加进自选（默认第一个分组）。
@@ -510,23 +459,14 @@ class _StockChartPanelState extends State<StockChartPanel> {
         _cross.active = i >= 0;
         _cross.index = i;
       }),
-      onTapBar: (i) {
-        if (_drawing != null) {
-          unawaited(_onCanvasTap(i));
-          return;
-        }
-        setState(() {
-          _focus = i;
-          _cross.clear();
-        });
-      },
-      onLongPressRelease: (i) {
-        if (_drawing != null) return;
-        setState(() {
-          _focus = i;
-          _cross.clear();
-        });
-      },
+      onTapBar: (i) => setState(() {
+        _focus = i;
+        _cross.clear();
+      }),
+      onLongPressRelease: (i) => setState(() {
+        _focus = i;
+        _cross.clear();
+      }),
       child: ListenableBuilder(
         listenable: _viewport,
         builder: (context, _) => _KlineCanvas(
@@ -535,7 +475,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
           viewport: _viewport,
           crossIndex: _cross.active ? _cross.index : -1,
           focusIndex: _focus,
-          subInd: widget.state.subInd,
+          subInds: widget.state.subInds,
           showMA: widget.state.showMA,
           showBoll: widget.state.showBoll,
           hollow: widget.state.hollow,
@@ -625,9 +565,6 @@ class _PeriodRow extends StatelessWidget {
     this.onAskBar,
     this.onSearch,
     this.onAddToWatch,
-    this.onDraw,
-    this.onClearDraw,
-    this.drawActive = false,
     this.onWatchlist,
     this.watchlistActive = false,
   });
@@ -643,13 +580,6 @@ class _PeriodRow extends StatelessWidget {
 
   /// 右上角「加入自选」。
   final VoidCallback? onAddToWatch;
-
-  /// 右上角画线。
-  final VoidCallback? onDraw;
-
-  /// 长按画线按钮清空。
-  final VoidCallback? onClearDraw;
-  final bool drawActive;
 
   /// 左侧自选抽屉开关。
   final VoidCallback? onWatchlist;
@@ -703,24 +633,6 @@ class _PeriodRow extends StatelessWidget {
                     const SizedBox(width: 3),
                     Text('问这根', style: TextStyle(fontSize: 11, color: scheme.primary)),
                   ],
-                ),
-              ),
-            ),
-          if (onDraw != null)
-            GestureDetector(
-              onTap: onDraw,
-              onLongPress: onClearDraw,
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 2),
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: drawActive ? scheme.primary.withValues(alpha: 0.16) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(7),
-                ),
-                child: Icon(
-                  Icons.gesture_rounded,
-                  size: 17,
-                  color: drawActive ? scheme.primary : scheme.onSurfaceVariant,
                 ),
               ),
             ),
@@ -820,7 +732,7 @@ class _IndBar extends StatelessWidget {
                       child: Row(
                         children: [
                           for (final k in subIndKeys)
-                            _Chip(label: indLabel(k), selected: state.subInd == k, onTap: () => state.setSub(k)),
+                            _Chip(label: indLabel(k), selected: state.isSubOn(k), onTap: () => state.toggleSub(k)),
                         ],
                       ),
                     ),
@@ -1115,7 +1027,7 @@ class _KlineCanvas extends StatelessWidget {
     required this.viewport,
     required this.crossIndex,
     required this.focusIndex,
-    required this.subInd,
+    required this.subInds,
     required this.showMA,
     required this.showBoll,
     required this.hollow,
@@ -1132,7 +1044,7 @@ class _KlineCanvas extends StatelessWidget {
 
   /// 点选高亮的索引；-1 表示无。
   final int focusIndex;
-  final String subInd;
+  final List<String> subInds;
   final bool showMA;
   final bool showBoll;
   final bool hollow;
@@ -1157,7 +1069,7 @@ class _KlineCanvas extends StatelessWidget {
             chan: chan,
             crossIndex: crossIndex,
             focusIndex: focusIndex,
-            subInd: subInd,
+            subInds: subInds,
             showMA: showMA,
             showBoll: showBoll,
             hollow: hollow,
@@ -1182,7 +1094,7 @@ class _KlinePainter extends CustomPainter {
     required this.chan,
     required this.crossIndex,
     required this.focusIndex,
-    required this.subInd,
+    required this.subInds,
     required this.showMA,
     required this.showBoll,
     required this.hollow,
@@ -1202,7 +1114,7 @@ class _KlinePainter extends CustomPainter {
   final ChanResult? chan;
   final int crossIndex;
   final int focusIndex;
-  final String subInd;
+  final List<String> subInds;
   final bool showMA;
   final bool showBoll;
   final bool hollow;
@@ -1222,7 +1134,9 @@ class _KlinePainter extends CustomPainter {
     const padTop = 4.0;
 
     // 副图占 26%，主图占其余。
-    final subH = size.height * 0.26;
+    // 副图总高度：没选任何副图就不占；选了多个按 0.20/个，上限占 45%。
+    final nSub = subInds.length;
+    final subH = nSub == 0 ? 0.0 : math.min(size.height * 0.45, size.height * 0.20 * nSub);
     final mainH = size.height - subH - padTop - 2;
     final chartW = size.width - padLeft - padRight;
     if (chartW <= 0 || mainH <= 0) return;
@@ -1597,32 +1511,56 @@ class _KlinePainter extends CustomPainter {
     canvas.drawPath(path, Paint()..color = color);
   }
 
+  /// 副图：按选中的指标平分副图区域，从上到下依次排列。
   void _paintSub(Canvas canvas, Size size, double chartW, double padLeft, double subH, double maxV) {
+    if (subInds.isEmpty || subH <= 0) return;
+
     final top = size.height - subH;
+    final each = subH / subInds.length;
+
+    for (var i = 0; i < subInds.length; i++) {
+      final kind = subInds[i];
+      final panelTop = top + i * each;
+
+      // 每个副图区域之间的分隔线
+      canvas.drawLine(
+        Offset(padLeft, panelTop),
+        Offset(padLeft + chartW, panelTop),
+        Paint()
+          ..color = grid
+          ..strokeWidth = 0.6,
+      );
+
+      // 左上角标出指标名，多副图并排时不至于看不懂
+      final tp = TextPainter(
+        text: TextSpan(
+          text: indLabel(kind),
+          style: TextStyle(color: text, fontSize: 8.5),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(padLeft + 2, panelTop + 1));
+
+      _paintOneSub(canvas, kind, chartW, padLeft, panelTop, each, maxV);
+    }
+  }
+
+  void _paintOneSub(Canvas canvas, String kind, double chartW, double padLeft, double top, double subH, double maxV) {
     final step = chartW / bars.length;
     double xOf(int i) => padLeft + (i + 0.5) * step;
+    final bottom = top + subH;
 
-    // 副图与主图之间的分隔
-    canvas.drawLine(
-      Offset(padLeft, top),
-      Offset(padLeft + chartW, top),
-      Paint()
-        ..color = grid
-        ..strokeWidth = 0.6,
-    );
-
-    if (subInd == 'VOL') {
+    if (kind == 'VOL') {
       final vma = volMaSeries(allBars, [5, 10]);
       for (var i = 0; i < bars.length; i++) {
         final b = bars[i];
-        final h = maxV == 0 ? 0.0 : b.v / maxV * (subH - 6);
+        final h = maxV == 0 ? 0.0 : b.v / maxV * (subH - 8);
         final isUp = b.c >= b.o;
         canvas.drawRect(
-          Rect.fromLTRB(xOf(i) - step * 0.31, size.height - 3 - h, xOf(i) + step * 0.31, size.height - 3),
+          Rect.fromLTRB(xOf(i) - step * 0.31, bottom - 3 - h, xOf(i) + step * 0.31, bottom - 3),
           Paint()..color = (isUp ? up : down).withValues(alpha: 0.5),
         );
       }
-      // 量均线
       for (var k = 0; k < 2; k++) {
         final vals = vma[['VMA5', 'VMA10'][k]]!;
         final p = Path();
@@ -1630,7 +1568,7 @@ class _KlinePainter extends CustomPainter {
         for (var i = 0; i < bars.length; i++) {
           final v = vals[offset + i];
           if (v == null) continue;
-          final y = size.height - 3 - (maxV == 0 ? 0 : v / maxV * (subH - 6));
+          final y = bottom - 3 - (maxV == 0 ? 0 : v / maxV * (subH - 8));
           if (!started) {
             p.moveTo(xOf(i), y);
             started = true;
@@ -1651,8 +1589,7 @@ class _KlinePainter extends CustomPainter {
       return;
     }
 
-    // MACD：柱 + DIF/DEA 线
-    if (subInd == 'MACD') {
+    if (kind == 'MACD') {
       final m = macd(allBars);
       var lo = 0.0;
       var hi = 0.0;
@@ -1664,7 +1601,7 @@ class _KlinePainter extends CustomPainter {
         }
       }
       final rng = (hi - lo) == 0 ? 1.0 : hi - lo;
-      double yOf(double v) => top + 3 + (hi - v) / rng * (subH - 8);
+      double yOf(double v) => top + 4 + (hi - v) / rng * (subH - 10);
       final zero = yOf(0);
 
       for (var i = 0; i < bars.length; i++) {
@@ -1676,39 +1613,12 @@ class _KlinePainter extends CustomPainter {
           Paint()..color = (v >= 0 ? up : down).withValues(alpha: 0.65),
         );
       }
-      for (final pair in [
-        [m.dif, maColors[0]],
-        [m.dea, maColors[1]],
-      ]) {
-        final vals = pair[0] as List<double?>;
-        final p = Path();
-        var started = false;
-        for (var i = 0; i < bars.length; i++) {
-          final v = vals[offset + i];
-          if (v == null) continue;
-          final y = yOf(v);
-          if (!started) {
-            p.moveTo(xOf(i), y);
-            started = true;
-          } else {
-            p.lineTo(xOf(i), y);
-          }
-        }
-        if (started) {
-          canvas.drawPath(
-            p,
-            Paint()
-              ..color = pair[1] as Color
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 1,
-          );
-        }
-      }
+      _drawSeries(canvas, bars, offset, [m.dif, maColors[0]], xOf, yOf);
+      _drawSeries(canvas, bars, offset, [m.dea, maColors[1]], xOf, yOf);
       return;
     }
 
-    // KDJ / RSI：0~100 区间折线
-    if (subInd == 'KDJ') {
+    if (kind == 'KDJ') {
       final kd = kdj(allBars);
       _paintLines(
         canvas,
@@ -1742,6 +1652,41 @@ class _KlinePainter extends CustomPainter {
       fixedLo: 0,
       fixedHi: 100,
     );
+  }
+
+  /// 画一条线（值为 null 处断开）。
+  void _drawSeries(
+    Canvas canvas,
+    List<Bar> bars,
+    int offset,
+    List<Object?> series,
+    double Function(int) xOf,
+    double Function(double) yOf,
+  ) {
+    final vals = series[0] as List<double?>;
+    final color = series[1] as Color;
+    final p = Path();
+    var started = false;
+    for (var i = 0; i < bars.length; i++) {
+      final v = vals[offset + i];
+      if (v == null) continue;
+      final y = yOf(v);
+      if (!started) {
+        p.moveTo(xOf(i), y);
+        started = true;
+      } else {
+        p.lineTo(xOf(i), y);
+      }
+    }
+    if (started) {
+      canvas.drawPath(
+        p,
+        Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1,
+      );
+    }
   }
 
   void _paintLines(
@@ -1823,63 +1768,9 @@ class _KlinePainter extends CustomPainter {
       old.offset != offset ||
       old.crossIndex != crossIndex ||
       old.focusIndex != focusIndex ||
-      old.subInd != subInd ||
+      !listEquals(old.subInds, subInds) ||
       old.showMA != showMA ||
       old.showBoll != showBoll ||
       old.hollow != hollow ||
       old.shapes != shapes;
-}
-
-/// 画线类型选择弹层。
-class _ShapeKindSheet extends StatelessWidget {
-  static const _items = <ShapeKind, (String, IconData)>{
-    ShapeKind.hline: ('水平线', Icons.horizontal_rule_rounded),
-    ShapeKind.trendline: ('趋势线', Icons.show_chart_rounded),
-    ShapeKind.ray: ('射线', Icons.arrow_forward_rounded),
-    ShapeKind.rect: ('矩形框', Icons.crop_square_rounded),
-    ShapeKind.text: ('文字', Icons.text_fields_rounded),
-    ShapeKind.arrow: ('箭头', Icons.north_east_rounded),
-    ShapeKind.dot: ('圆点', Icons.circle_outlined),
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 10),
-          Container(
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(color: scheme.outlineVariant, borderRadius: BorderRadius.circular(2)),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Text(
-              '选择画线类型',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.onSurface),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-            child: Text('单点类：水平线、文字、圆点点一下就落笔；两点类点两下', style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant)),
-          ),
-          for (final e in _items.entries)
-            ListTile(
-              dense: true,
-              leading: Icon(e.value.$2, size: 18, color: scheme.primary),
-              title: Text(e.value.$1, style: TextStyle(fontSize: 13.5, color: scheme.onSurface)),
-              onTap: () => Navigator.of(context).pop(e.key),
-            ),
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
-  }
 }

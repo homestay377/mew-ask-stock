@@ -18,7 +18,6 @@ import '../data/database.dart';
 import '../data/models_misc.dart';
 import '../data/settings.dart';
 import '../state/settings_store.dart';
-import '../ui/stock/stock_link.dart';
 import '../tools/app_tools.dart';
 import '../tools/local_tools.dart';
 import '../tools/mcp.dart';
@@ -98,11 +97,6 @@ class ChatController extends ChangeNotifier {
     final user = ChatMessage(role: Role.user, parts: parts);
     _conv = _conv.upsertMessage('n-${user.id}', user).copyWith(updatedAt: DateTime.now(), suggestions: const []);
     notifyListeners();
-
-    // 面板联动：先按原话把 K 线切过去，再让模型回答。
-    // 不阻塞发送——联动失败不能影响对话。
-    final text = parts.whereType<TextPart>().map((p) => p.text).join(' ');
-    unawaited(linkStockPanel(text));
 
     await _generate();
   }

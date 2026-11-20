@@ -162,51 +162,194 @@ List<AppTool> buildStockTools({bool enabled = true}) {
       name: 'stock_levels',
       displayName: '多级别',
       description:
-          '一次拉多个周期的缠论结构做对照（周线/日线/60分/30分/15分）。'
-          '判断「大级别方向 + 小级别买点」时必须用这个，不要自己切周期逐个问。',
+          '一次分析多个周期（周/日/60分/30分/15分）的缠论结构，也可以一次传多只股票。'
+          '判断「大级别方向 + 小级别买点」、或横向对比几只股票时用它，'
+          '不要自己切周期或逐个问——那样会多花好几倍轮次。\n'
+          'symbols 支持多只（逗号分隔），内部并行取数。',
       parameters: objectSchema(
-        {'symbol': strProp('股票代码，如 300274'), 'periods': strProp('要对照的周期，逗号分隔，如 week,day,m60；默认 week,day,m60,m30,m15')},
-        required: ['symbol'],
+        {
+          'symbols': strProp('股票代码，多只用逗号分隔，如 300274,600519,000001'),
+          'periods': strProp('要对照的周期，逗号分隔，默认 week,day,m60,m30,m15'),
+          'bars': intProp('每个周期取多少根，默认 400（缠论建议 >=400）'),
+        },
+        required: ['symbols'],
       ),
-      promptHint: '多级别要说明各级别方向是否一致；不一致时指出冲突在哪一级别，以及以哪一级别为准。',
+      promptHint:
+          '多级别要说明各级别方向是否一致；不一致时指出冲突在哪一级别、以哪一级别为准。'
+          '多只股票对比要给出横向排序依据，而不是逐只念一遍。',
       execute: (args) async {
         try {
-          final symbol = '${args['symbol'] ?? ''}'.trim();
-          if (symbol.isEmpty) return jsonEncode({'error': '缺少 symbol'});
+          final rawSymbols = '${args['symbols'] ?? args['symbol'] ?? ''}'.trim();
+          if (rawSymbols.isEmpty) return jsonEncode({'error': '缺少 symbols'});
+
+          final symbols = rawSymbols.split(RegExp(r'[,，\s]+')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+          if (symbols.isEmpty) return jsonEncode({'error': 'symbols 解析后为空'});
+
+          // 批量上限：再多会被接口限流，也超出模型一次能消化的量
+          const maxSymbols = 8;
+          final truncated = symbols.length > maxSymbols;
+          final list = truncated ? symbols.take(maxSymbols).toList() : symbols;
+
           final rawPeriods = '${args['periods'] ?? 'week,day,m60,m30,m15'}';
-          final periods = rawPeriods.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+          final periods = rawPeriods.split(RegExp(r'[,，\s]+')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+          final barsRaw = args['bars'];
+          final bars = barsRaw is int ? barsRaw.clamp(100, chanBarCount) : 400;
 
           final az = await analyzer();
-          final out = <Map<String, dynamic>>[];
-          for (final p in periods) {
-            try {
-              final r = await az.analyze(symbol, period: p, count: 400);
-              out.add({
-                'period': StockAnalyzer.periodName(p),
-                'bars': r.series.length,
-                'close': r.series.last.c,
-                'pens': r.chan.pens.length,
-                'boxes': r.chan.boxes.length,
-                'box_position': r.chan.stats.boxPosition,
-                'last_signals': [
-                  for (final s in r.chan.signals.take(2))
-                    {'label': s.label, 'price': double.parse(s.price.toStringAsFixed(2)), 'strength': s.strength},
-                ],
-                'last_points': [
-                  for (final pt in r.chan.points.take(2))
-                    {'label': pt.label, 'price': double.parse(pt.price.toStringAsFixed(2))},
-                ],
-              });
-            } catch (e) {
-              out.add({'period': p, 'error': '$e'});
-            }
-          }
-          return jsonEncode({'symbol': symbol, 'levels': out});
+
+          // 并行：股票 × 周期 全部同时发，接口本身有缓存兜底。
+          final results = await Future.wait([
+            for (final sym in list)
+              Future.wait([
+                for (final p in periods)
+                  az
+                      .analyze(sym, period: p, count: bars)
+                      .then<Map<String, dynamic>>(
+                        (r) => {
+                          'period': StockAnalyzer.periodName(p),
+                          'bars': r.series.length,
+                          'close': r.series.last.c,
+                          'pens': r.chan.pens.length,
+                          'boxes': r.chan.boxes.length,
+                          'box_position': r.chan.stats.boxPosition,
+                          'last_signals': [
+                            for (final s in r.chan.signals.take(2))
+                              {
+                                'label': s.label,
+                                'price': double.parse(s.price.toStringAsFixed(2)),
+                                'strength': s.strength,
+                              },
+                          ],
+                          'last_points': [
+                            for (final pt in r.chan.points.take(2))
+                              {'label': pt.label, 'price': double.parse(pt.price.toStringAsFixed(2))},
+                          ],
+                        },
+                      )
+                      .catchError((Object e) => {'period': p, 'error': '$e'}),
+              ]),
+          ]);
+
+          final payload = <String, dynamic>{
+            'symbols': list,
+            'levels': {for (var i = 0; i < list.length; i++) list[i]: results[i]},
+            if (truncated) 'note': '一次最多 ${maxSymbols} 只，已截断。剩下的请再调一次。',
+          };
+          return jsonEncode(payload);
         } catch (e) {
           return jsonEncode({'error': '$e'});
         }
       },
     ),
+    AppTool(
+      name: 'stock_panel_show',
+      displayName: '打开K线',
+      description:
+          '把 App 底部的 K 线面板切到指定股票和周期，用户能立刻看到你在分析的图。'
+          '当你为用户分析某只股票、或要配合画线说明走势时调用它——'
+          '分析完 A 股面板还停在 B 股，用户会困惑。'
+          '同一只股票不必重复调用。',
+      parameters: objectSchema(
+        {
+          'symbol': strProp('股票代码，如 300274 或 sh600519'),
+          'period': strProp(
+            '周期：minute/day/week/month/m60/m30/m15/m5，默认保持用户当前选择',
+            enumValues: ['minute', 'day', 'week', 'month', 'm60', 'm30', 'm15', 'm5'],
+          ),
+        },
+        required: ['symbol'],
+      ),
+      promptHint: '切面板是为用户服务，不是每次回答都要切；只在你确实在讨论这只股票时用。',
+      execute: (args) async {
+        try {
+          final raw = '${args['symbol'] ?? ''}'.trim();
+          if (raw.isEmpty) return jsonEncode({'error': '缺少 symbol'});
+
+          final code = source.normalize(raw);
+          final period = args['period']?.toString();
+          final ok = await stockPanelRequest.show(code, period: period);
+          if (!ok) return jsonEncode({'error': '面板切换失败'});
+
+          return jsonEncode({
+            'ok': true,
+            'symbol': code,
+            'period': period ?? 'unchanged',
+            'note': 'K 线面板已切到该标的，用户现在能看到这张图',
+          });
+        } catch (e) {
+          return jsonEncode({'error': '$e'});
+        }
+      },
+    ),
+
+    AppTool(
+      name: 'scan_stocks',
+      displayName: '批量扫描',
+      description:
+          '批量扫描多只股票的当前状态，只返回摘要（现价、涨跌、缠论结构、买卖点），'
+          '不返回 K 线明细——用来快速筛出值得深入看的那几只。\n'
+          '需要详细分析时，再对筛出来的股票单独调 analyze_chan。',
+      parameters: objectSchema(
+        {
+          'symbols': strProp('股票代码，多只用逗号分隔，如 300274,600519,000001，最多 20 只'),
+          'period': strProp('分析周期，默认 day', enumValues: ['day', 'week', 'm60', 'm30', 'm15']),
+        },
+        required: ['symbols'],
+      ),
+      promptHint: '扫描结果是筛选用的，不要逐只罗列。挑出符合条件的那几只说明理由，其余一句话带过。',
+      execute: (args) async {
+        try {
+          final raw = '${args['symbols'] ?? ''}'.trim();
+          if (raw.isEmpty) return jsonEncode({'error': '缺少 symbols'});
+          final symbols = raw
+              .split(RegExp(r'[,，\s]+'))
+              .map((e) => e.trim())
+              .where((e) => e.isNotEmpty)
+              .toSet()
+              .take(20)
+              .toList();
+          final period = '${args['period'] ?? 'day'}';
+
+          final az = await analyzer();
+          // 全部并行。单只失败不影响其他。
+          final rows = await Future.wait([
+            for (final sym in symbols)
+              Future.wait([
+                source.quoteCached(sym).then<Quote?>((q) => q).catchError((Object _) => null),
+                az
+                    .analyze(sym, period: period, count: 400)
+                    .then<StockAnalysis?>((r) => r)
+                    .catchError((Object _) => null),
+              ]).then((pair) {
+                final q = pair[0] as Quote?;
+                final r = pair[1] as StockAnalysis?;
+                if (r == null) {
+                  return {'symbol': sym, 'error': '取数失败'};
+                }
+                return {
+                  'symbol': r.series.symbol,
+                  'name': r.series.name,
+                  if (q != null) 'price': q.price,
+                  if (q != null) 'change_pct': double.parse(q.changePct.toStringAsFixed(2)),
+                  'close': r.series.last.c,
+                  'boxes': r.chan.boxes.length,
+                  'box_position': r.chan.stats.boxPosition,
+                  'last_point': r.chan.points.isEmpty ? null : r.chan.points.last.label,
+                  'last_point_price': r.chan.points.isEmpty
+                      ? null
+                      : double.parse(r.chan.points.last.price.toStringAsFixed(2)),
+                  'last_signal': r.chan.signals.isEmpty ? null : r.chan.signals.last.label,
+                };
+              }),
+          ]);
+
+          return jsonEncode({'period': StockAnalyzer.periodName(period), 'count': rows.length, 'results': rows});
+        } catch (e) {
+          return jsonEncode({'error': '$e'});
+        }
+      },
+    ),
+
     AppTool(
       name: 'chart_annotate',
       displayName: '标注',

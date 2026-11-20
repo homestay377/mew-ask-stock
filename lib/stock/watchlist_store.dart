@@ -232,6 +232,77 @@ class WatchlistStore extends ChangeNotifier {
     await _persist();
   }
 
+  /// 调整分组顺序。
+  Future<void> reorderGroups(List<String> orderedIds) async {
+    await load();
+    final map = {for (final g in _groups) g.id: g};
+    final next = <WatchGroup>[];
+    for (final id in orderedIds) {
+      final g = map.remove(id);
+      if (g != null) next.add(g);
+    }
+    // 没在顺序里的（理论上不会有）追加到末尾，避免丢分组
+    next.addAll(map.values);
+    _groups = next;
+    notifyListeners();
+    await _persist();
+  }
+
+  /// 批量把多只股票移入某个分组。已有的跳过。
+  Future<int> addManyToGroup(Iterable<String> codes, String groupId, {Map<String, String>? names}) async {
+    await load();
+    var added = 0;
+    final next = [..._items];
+    for (final code in codes) {
+      final idx = next.indexWhere((e) => e.code == code);
+      if (idx >= 0) {
+        final cur = next[idx];
+        if (!cur.groups.contains(groupId)) {
+          next[idx] = cur.copyWith(groups: [...cur.groups, groupId]);
+          added++;
+        }
+      } else {
+        next.add(
+          WatchItem(
+            code: code,
+            name: names?[code] ?? code,
+            groups: groupId.isEmpty ? const [] : [groupId],
+            sort: next.length,
+          ),
+        );
+        added++;
+      }
+    }
+    _items = next;
+    notifyListeners();
+    await _persist();
+    return added;
+  }
+
+  /// 批量从某个分组移出。
+  Future<int> removeManyFromGroup(Iterable<String> codes, String groupId) async {
+    await load();
+    final set = codes.toSet();
+    var n = 0;
+    final next = <WatchItem>[];
+    for (final i in _items) {
+      if (set.contains(i.code) && i.groups.contains(groupId)) {
+        n++;
+        final rest = [
+          for (final g in i.groups)
+            if (g != groupId) g,
+        ];
+        if (rest.isNotEmpty) next.add(i.copyWith(groups: rest));
+      } else {
+        next.add(i);
+      }
+    }
+    _items = next;
+    notifyListeners();
+    await _persist();
+    return n;
+  }
+
   /// 调整顺序（拖动排序用）。
   Future<void> reorder(List<String> orderedCodes) async {
     await load();
