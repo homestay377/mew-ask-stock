@@ -755,6 +755,10 @@ class _PeriodRow extends StatelessWidget {
 }
 
 /// 指标横条：主图一排、副图一排。
+/// 指标横条：**主图与副图同一行、左右分栏**，各自可横向滑动。
+///
+/// 左侧主图指标（MA/BOLL/缠论/空心K），右侧副图指标（量/MACD/KDJ/RSI）。
+/// 中间一条细分隔线，两侧互不干扰地各自滚动。
 class _IndBar extends StatelessWidget {
   const _IndBar({required this.state, required this.onChange});
 
@@ -765,44 +769,75 @@ class _IndBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                Text('主', style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant)),
-                const SizedBox(width: 6),
-                for (final k in mainIndKeys)
-                  _Chip(
-                    label: indLabel(k, hollow: state.hollow),
-                    selected: state.mainOn[k] ?? false,
-                    onTap: () {
-                      state.toggleMain(k);
-                      onChange();
-                    },
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      child: SizedBox(
+        height: 26,
+        child: Row(
+          children: [
+            // 左：主图指标
+            Expanded(
+              flex: 1,
+              child: Row(
+                children: [
+                  _tag('主', scheme),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          for (final k in mainIndKeys)
+                            _Chip(
+                              label: indLabel(k, hollow: state.hollow),
+                              selected: state.mainOn[k] ?? false,
+                              onTap: () {
+                                state.toggleMain(k);
+                                onChange();
+                              },
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
-              ],
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 3),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                Text('副', style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant)),
-                const SizedBox(width: 6),
-                for (final k in subIndKeys)
-                  _Chip(label: indLabel(k), selected: state.subInd == k, onTap: () => state.setSub(k)),
-              ],
+            // 中：分隔
+            Container(
+              width: 1,
+              height: 16,
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              color: scheme.outlineVariant.withValues(alpha: 0.6),
             ),
-          ),
-        ],
+            // 右：副图指标
+            Expanded(
+              flex: 1,
+              child: Row(
+                children: [
+                  _tag('副', scheme),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          for (final k in subIndKeys)
+                            _Chip(label: indLabel(k), selected: state.subInd == k, onTap: () => state.setSub(k)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
+
+  Widget _tag(String text, ColorScheme scheme) => Padding(
+    padding: const EdgeInsets.only(right: 4),
+    child: Text(text, style: TextStyle(fontSize: 9.5, color: scheme.onSurfaceVariant)),
+  );
 }
 
 /// 行情条：现价/涨跌，或选中那根 K 线的开高低收。
@@ -1240,9 +1275,73 @@ class _KlinePainter extends CustomPainter {
     final bodyW = math.max(1.0, step * 0.62);
     double xOf(int i) => padLeft + (i + 0.5) * step;
 
-    // ---- 缠论中枢（最底层）----
+    // ---- 缠论：笔 + 中枢 ----
     final ch = chan;
     if (ch != null) {
+      // 笔：把转折点连成折线（Eta 的 pen 线）。
+      // 先画，避免盖住蜡烛；颜色用醒目的金黄，和中枢框区分。
+      if (ch.pens.length >= 2) {
+        final penPath = Path();
+        var started = false;
+        for (final p in ch.pens) {
+          final i = p.idx - offset;
+          // 完全在窗口外的点跳过，但保留跨窗口的连接
+          if (p.idx < offset - 1 || p.idx > offset + bars.length) continue;
+          final x = padLeft + (i + 0.5) * step;
+          final y = yOf(p.price);
+          if (!started) {
+            penPath.moveTo(x, y);
+            started = true;
+          } else {
+            penPath.lineTo(x, y);
+          }
+        }
+        if (started) {
+          canvas.drawPath(
+            penPath,
+            Paint()
+              ..color = const Color(0xFFE8C63D).withValues(alpha: 0.9)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.1,
+          );
+        }
+
+        // 笔的转折点小圆点
+        for (final p in ch.pens) {
+          final i = p.idx - offset;
+          if (i < 0 || i >= bars.length) continue;
+          canvas.drawCircle(
+            Offset(padLeft + (i + 0.5) * step, yOf(p.price)),
+            1.8,
+            Paint()..color = const Color(0xFFE8C63D),
+          );
+        }
+      }
+
+      // 背驰信号：在对应 K 线上打标记
+      for (final sig in ch.signals) {
+        final i = sig.idx - offset;
+        if (i < 0 || i >= bars.length) continue;
+        final x = padLeft + (i + 0.5) * step;
+        final y = yOf(sig.price);
+        final isBuy = sig.type == 'buy';
+        final c = isBuy ? up : down;
+        // 买点画在下方朝上的三角，卖点画在上方朝下的三角
+        final dy = isBuy ? 9.0 : -9.0;
+        final path = Path();
+        if (isBuy) {
+          path.moveTo(x, y - dy);
+          path.lineTo(x - 3.5, y - dy + 6);
+          path.lineTo(x + 3.5, y - dy + 6);
+        } else {
+          path.moveTo(x, y - dy);
+          path.lineTo(x - 3.5, y - dy - 6);
+          path.lineTo(x + 3.5, y - dy - 6);
+        }
+        path.close();
+        canvas.drawPath(path, Paint()..color = c.withValues(alpha: 0.85));
+      }
+
       for (final box in ch.boxes) {
         final s = box.s - offset;
         final e = box.e - offset;
