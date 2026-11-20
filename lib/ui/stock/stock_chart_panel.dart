@@ -404,6 +404,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
               ),
               if (_quote != null || _focusBar != null)
                 _QuoteBar(quote: _quote, focusBar: _focusBar, focusDate: _focusDate),
+              if (_series?.isFallback == true) _fallbackNotice(scheme),
               _IndBar(state: widget.state, onChange: _syncChan),
               Divider(height: 1, color: scheme.outlineVariant.withValues(alpha: 0.35)),
               Expanded(child: _buildBody(scheme)),
@@ -421,6 +422,27 @@ class _StockChartPanelState extends State<StockChartPanel> {
                 onClose: () => setState(() => _drawerOpen = false),
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  /// 用了备源（新浪）时的提示：不复权，除权日会跳空，缠论可能多出假信号。
+  Widget _fallbackNotice(ColorScheme scheme) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 3),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline_rounded, size: 11, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 3),
+          Expanded(
+            child: Text(
+              '腾讯源不可用，已切到新浪。该源不复权，除权日有跳空',
+              style: TextStyle(fontSize: 9, color: scheme.onSurfaceVariant),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
         ],
       ),
     );

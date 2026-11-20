@@ -29,7 +29,13 @@ class StockDataError implements Exception {
 
 /// 一个周期的 K 线集合。
 class KlineSeries {
-  KlineSeries({required this.symbol, required this.name, required this.period, required this.bars});
+  KlineSeries({
+    required this.symbol,
+    required this.name,
+    required this.period,
+    required this.bars,
+    this.source = 'tencent',
+  });
 
   final String symbol;
   final String name;
@@ -37,6 +43,12 @@ class KlineSeries {
   /// `day` / `week` / `month` / `m60` / `m30` / `m15` / `m5`
   final String period;
   final List<Bar> bars;
+
+  /// 数据来源：`tencent`（前复权）或 `sina`（不复权，备源）。
+  /// 备源时除权日附近会有跳空，缠论可能因此多出假信号，值得在摘要里提一句。
+  final String source;
+
+  bool get isFallback => source != 'tencent';
 
   int get length => bars.length;
   Bar get last => bars.last;
@@ -201,12 +213,33 @@ class StockSource {
     return v;
   }
 
-  /// 拉 K 线。
+  /// 拉 K 线。腾讯为主源（前复权），失败自动降级到新浪。
   ///
-  /// [count] 默认 640（缠论建议值）。分钟线腾讯单次上限较低，会自动取实际返回。
+  /// [count] 默认 640（缠论建议值）。分钟线单次上限较低，会自动取实际返回。
+  ///
+  /// **为什么需要降级**：腾讯的 `web.ifzq` 域名曾经对 K 线接口返回 501
+  /// （WAF 拦截），整个面板就刷不出图。多挂一个源，单点故障不至于全停。
   Future<KlineSeries> kline(String symbol, {String period = 'day', int count = chanBarCount}) async {
     final code = normalize(symbol);
     final p = normalizePeriod(period);
+
+    Object? tencentError;
+    try {
+      return await _klineTencent(code, p, count);
+    } catch (e) {
+      tencentError = e;
+    }
+
+    try {
+      return await _klineSina(code, p, count);
+    } catch (e) {
+      throw StockDataError('行情源都失败了。腾讯：$tencentError；新浪：$e');
+    }
+  }
+
+  // ------------------------------------------------------------ 腾讯（主源）
+
+  Future<KlineSeries> _klineTencent(String code, String p, int count) async {
     // ★ 不能用 startsWith('m')：month 也以 m 开头，会被误判为分钟线走 mkline 接口。
     final isMinute = RegExp(r'^m\d+$').hasMatch(p);
 
@@ -216,7 +249,8 @@ class StockSource {
       url = 'https://ifzq.gtimg.cn/appstock/app/kline/mkline?param=$code,$p,,,$count';
     } else {
       // 日/周/月线：param=code,period,,,count,qfq（4 个逗号是正确格式）
-      url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=$code,$p,,,$count,qfq';
+      // ★ 必须用 ifzq.gtimg.cn：web.ifzq 那个域名已经被腾讯 WAF 拦成 501 了
+      url = 'https://ifzq.gtimg.cn/appstock/app/fqkline/get?param=$code,$p,,,$count,qfq';
     }
 
     // 腾讯接口偶发返回 param error / 空 data（抖动），重试一次再判失败。
@@ -275,8 +309,59 @@ class StockSource {
     if (bars.isEmpty) throw StockDataError('$code 的 K 线解析后为空');
 
     final name = _nameFromNode(node.cast<String, dynamic>()) ?? code;
-
     return KlineSeries(symbol: code, name: name, period: p, bars: bars);
+  }
+
+  // ------------------------------------------------------------ 新浪（备源）
+
+  /// 新浪 scale 参数：日 240 / 周 1200 / 月 7200，分钟直接用 5/15/30/60。
+  static const _sinaScale = <String, int>{
+    'day': 240,
+    'week': 1200,
+    'month': 7200,
+    'm60': 60,
+    'm30': 30,
+    'm15': 15,
+    'm5': 5,
+  };
+
+  /// 新浪 K 线（**不复权**）。
+  ///
+  /// 作为热备：字段名是显式的，不依赖 qfqday/day 这类命名猜测；
+  /// 代价是不复权，除权日附近会有跳空，缠论可能因此多出假信号。
+  /// 只在腾讯失败时使用，结果会在 `KlineSeries.source` 上标注。
+  Future<KlineSeries> _klineSina(String code, String p, int count) async {
+    final scale = _sinaScale[p];
+    if (scale == null) throw StockDataError('新浪源不支持周期 $p');
+
+    final url =
+        'https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/'
+        'CN_MarketData.getKLineData?symbol=$code&scale=$scale&ma=no&datalen=$count';
+    final body = await _text(url, referer: 'https://finance.sina.com.cn/');
+    final trimmed = body.trim();
+    if (trimmed.isEmpty || trimmed == 'null') {
+      throw StockDataError('新浪返回空数据');
+    }
+
+    final list = jsonDecode(trimmed);
+    if (list is! List || list.isEmpty) throw StockDataError('新浪返回格式异常');
+
+    final bars = <Bar>[];
+    for (final e in list) {
+      if (e is! Map) continue;
+      final t = e['day']?.toString() ?? '';
+      final o = _d(e['open']);
+      final h = _d(e['high']);
+      final l = _d(e['low']);
+      final c = _d(e['close']);
+      // 新浪的量是「股」，腾讯是「手」，统一除以 100 好让指标口径一致
+      final v = (_d(e['volume']) ?? 0) / 100;
+      if (o == null || h == null || l == null || c == null) continue;
+      bars.add(Bar(o, h, l, c, v: v, t: t));
+    }
+    if (bars.isEmpty) throw StockDataError('新浪 K 线解析后为空');
+
+    return KlineSeries(symbol: code, name: code, period: p, bars: bars, source: 'sina');
   }
 
   String? _nameFromNode(Map<String, dynamic> node) {
@@ -374,7 +459,7 @@ class StockSource {
   /// 当天分时。必须带 `Referer: https://gu.qq.com/`。
   Future<MinuteSeries> minute(String symbol) async {
     final code = normalize(symbol);
-    final url = 'https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=$code';
+    final url = 'https://ifzq.gtimg.cn/appstock/app/minute/query?code=$code';
     final body = await _text(url, referer: 'https://gu.qq.com/');
     final root = jsonDecode(body);
     if (root is! Map || root['code'] != 0) {
