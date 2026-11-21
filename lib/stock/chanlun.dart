@@ -667,3 +667,38 @@ class Chanlun {
     );
   }
 }
+
+/// 由笔序列判断趋势方向。
+///
+/// 判据只看**最近的结构**，不用价格与均线的关系——均线会滞后，
+/// 而缠论的笔本身就是结构。取最近 4 个转折点，从中提取两高两低：
+///
+///  - 高点抬高 且 低点抬高 → `上升`
+///  - 高点降低 且 低点降低 → `下降`
+///  - 其他（一高一低、或数据不足）→ `震荡` / `数据不足`
+///
+/// 返回的都是中文字面量，直接进摘要，不需要调用方再翻译。
+String trendOf(List<PenPoint> pens) {
+  if (pens.length < 4) return '数据不足';
+
+  final tail = pens.sublist(pens.length - 4);
+  final highs = [
+    for (final p in tail)
+      if (p.type == '顶') p.price,
+  ];
+  final lows = [
+    for (final p in tail)
+      if (p.type == '底') p.price,
+  ];
+  if (highs.length < 2 || lows.length < 2) return '数据不足';
+
+  // 时间顺序：highs[0] 早于 highs[1]
+  final highRising = highs[1] > highs[0];
+  final highFalling = highs[1] < highs[0];
+  final lowRising = lows[1] > lows[0];
+  final lowFalling = lows[1] < lows[0];
+
+  if (highRising && lowRising) return '上升';
+  if (highFalling && lowFalling) return '下降';
+  return '震荡';
+}

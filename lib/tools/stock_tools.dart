@@ -8,6 +8,7 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart' show rootBundle;
 
+import '../stock/chanlun.dart';
 import '../stock/chart_shapes.dart';
 import '../stock/stock_bridge.dart';
 import '../stock/shape_store.dart';
@@ -285,7 +286,14 @@ List<AppTool> buildStockTools({bool enabled = true}) {
         required: ['symbols'],
       ),
       promptHint:
-          '多级别要说明各级别方向是否一致；不一致时指出冲突在哪一级别、以哪一级别为准。'
+          '多级别结论按这个顺序组织，缺一不可：\n'
+          '1) 大级别（周线）趋势是什么；\n'
+          '2) 日线当前处在什么位置（中枢上方/内/下方）；\n'
+          '3) 60 分钟与日线方向是否一致——不一致时说明以哪一级别为准、为什么；\n'
+          '4) 值得关注的关键价位或结构；\n'
+          '5) 哪些条件会支持或推翻当前判断。\n'
+          '不要把各周期的买卖信号数一数、加个权——那没有意义。矛盾就直说矛盾。'
+          '如果返回里有 bars_adequate=false，说明该周期数据不够，结论要打折扣。'
           '多只股票对比要给出横向排序依据，而不是逐只念一遍。',
       execute: (args) async {
         try {
@@ -322,8 +330,16 @@ List<AppTool> buildStockTools({bool enabled = true}) {
                   .then<Map<String, dynamic>>(
                     (r) => {
                       'period': StockAnalyzer.periodName(p),
+                      'period_key': p,
                       'bars': r.series.length,
-                      'close': r.series.last.c,
+                      'close': r2(r.series.last.c),
+                      'last_date': r.series.last.t,
+                      // 数据源与复权口径：跨周期对照时不能把不同源的数据直接拼起来
+                      'source': r.series.source,
+                      'adj': r.series.source == 'sina' ? '不复权' : '前复权',
+                      // 结构需要足够历史才收敛（实测 400 根起）；不足时结论不稳
+                      'bars_adequate': r.series.length >= 400,
+                      'trend': trendOf(r.chan.pens),
                       'pens': r.chan.pens.length,
                       'boxes': r.chan.boxes.length,
                       'box_position': r.chan.stats.boxPosition,
@@ -334,15 +350,40 @@ List<AppTool> buildStockTools({bool enabled = true}) {
                       'last_points': [
                         for (final pt in r.chan.points.take(2)) {'label': pt.label, 'price': r2(pt.price)},
                       ],
+                      if (r.chan.unknownFunctions.isNotEmpty) 'formula_gaps': r.chan.unknownFunctions,
                     },
                   )
                   .catchError((Object e) => {'period': p, 'error': '$e'}),
             ),
           );
 
+          // 跨周期冲突检测：只看「大级别 vs 小级别」方向是否相反。
+          // 不做加权、不做计数——提案明确说过不要机械加权，
+          // 矛盾本身就值得单独说，而不是被平均掉。
+          final conflicts = <String, List<String>>{};
+          for (var i = 0; i < list.length; i++) {
+            final levels = {for (final m in results[i]) '${m['period_key'] ?? ''}': m};
+            final found = <String>[];
+            void cmp(String a, String b, String label) {
+              final ta = levels[a]?['trend'];
+              final tb = levels[b]?['trend'];
+              if (ta == null || tb == null) return;
+              if (ta == '数据不足' || tb == '数据不足') return;
+              if (ta != tb && (ta == '上升' || ta == '下降') && (tb == '上升' || tb == '下降')) {
+                found.add('${levels[a]?['period']}($ta) 与 ${levels[b]?['period']}($tb) $label');
+              }
+            }
+
+            cmp('week', 'day', '方向相反');
+            cmp('day', 'm60', '方向相反');
+            cmp('day', 'm30', '方向相反');
+            if (found.isNotEmpty) conflicts[list[i]] = found;
+          }
+
           final payload = <String, dynamic>{
             'symbols': list,
             'levels': {for (var i = 0; i < list.length; i++) list[i]: results[i]},
+            if (conflicts.isNotEmpty) 'conflicts': conflicts,
             if (truncated) 'note': '一次最多 $maxSymbols 只，已截断。剩下的请再调一次。',
           };
           return jsonEncode(payload);
