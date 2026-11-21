@@ -235,7 +235,7 @@ class ChartContext {
     };
     b.writeln('【当前图表：$name $symbol · $periodLabel】');
     b.writeln(
-      '数据源 $source，共 $barCount 根，最后一根 ${lastDate}'
+      '数据源 $source，共 $barCount 根，最后一根 $lastDate'
       '${lastBarIsToday ? '（今天，可能还没收盘）' : ''}',
     );
 

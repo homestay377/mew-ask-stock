@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mewhub/stock/chanlun.dart';
 import 'package:mewhub/stock/chart_context.dart';
-import 'package:mewhub/stock/stock_source.dart';
 
 /// 图表上下文回归。
 ///
