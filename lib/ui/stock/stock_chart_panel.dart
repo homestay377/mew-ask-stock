@@ -19,6 +19,7 @@ import 'package:flutter/material.dart';
 import '../../core/paths.dart';
 import '../../stock/chanlun.dart';
 import '../../stock/chart_context.dart';
+import '../../stock/data_quality.dart';
 import '../../stock/indicators.dart';
 import '../../stock/chart_shapes.dart';
 import '../../stock/shape_colors.dart';
@@ -250,6 +251,10 @@ class _StockChartPanelState extends State<StockChartPanel> {
   ChanResult? _chan;
   Quote? _quote;
   String? _error;
+
+  /// 后台刷新失败的原文。null = 上次刷新成功或还没刷新过。
+  /// 拿它跟 [_series.fromCache] 一起判断「屏幕上这份数据是不是陈的」。
+  String? _refreshError;
   bool _loading = false;
   String _lastKey = '';
 
@@ -352,6 +357,10 @@ class _StockChartPanelState extends State<StockChartPanel> {
         period: widget.state.period,
         // 后台刷新拿到新数据时静默替换，不重算视口（用户可能正在缩放）
         onRefresh: (fresh) => _applyFreshData(fresh, key),
+        // 刷新失败不能装没事：界面要继续标着「这是缓存」，而不是假装实时
+        onRefreshFailed: (err) {
+          if (mounted && _lastKey == key) setState(() => _refreshError = err);
+        },
       );
       if (!mounted || _lastKey != key) return;
       ChanResult? ch;
@@ -432,7 +441,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
               ),
               if (_quote != null || _focusBar != null)
                 _QuoteBar(quote: _quote, focusBar: _focusBar, focusDate: _focusDate),
-              if (_series?.isFallback == true) _fallbackNotice(scheme),
+              if (_dataNoticeText() != null) _dataNotice(scheme),
               _IndBar(state: widget.state, onChange: _syncChan, onAskIndicator: _askAboutIndicator),
               Divider(height: 1, color: scheme.outlineVariant.withValues(alpha: 0.35)),
               Expanded(child: _buildBody(scheme)),
@@ -467,12 +476,43 @@ class _StockChartPanelState extends State<StockChartPanel> {
     if (!mounted || _lastKey != key) return;
     setState(() {
       _series = fresh;
+      _refreshError = null;
       _chan = ch;
     });
   }
 
-  /// 用了备源（新浪）时的提示：不复权，除权日会跳空，缠论可能多出假信号。
-  Widget _fallbackNotice(ColorScheme scheme) {
+  /// 数据提示条要说的那句话。没有可说的就返回 null（整条不占位）。
+  ///
+  /// 三件事按严重程度排序，只显示最要紧的一条：
+  ///  1. 数据本身有毛病（OHLC 自洽性、重复日期等）
+  ///  2. 用的是备源，复权口径变了
+  ///  3. 数据显示的是缓存，刷新还失败了
+  String? _dataNoticeText() {
+    final s = _series;
+    if (s == null) return null;
+
+    final q = s.quality;
+    if (!q.ok) return '数据异常：${q.issues.first}';
+
+    if (s.isFallback) {
+      final why = s.fallbackReason;
+      return '已切到备源（${s.source}，${s.adjust}）'
+          '${why == null ? '' : ' · 主源失败'}，除权日附近会有跳空';
+    }
+
+    if (s.fromCache) {
+      final age = s.cacheAge;
+      final stale = age == null || age.inSeconds >= 90;
+      if (stale) {
+        final err = _refreshError;
+        final aged = age == null ? '上次的缓存' : '${humanAge(age)}的缓存';
+        return err == null ? '显示的是${aged}，正在后台刷新' : '刷新失败（${err}），显示的是${aged}';
+      }
+    }
+    return null;
+  }
+
+  Widget _dataNotice(ColorScheme scheme) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 3),
       child: Row(
@@ -481,7 +521,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
           const SizedBox(width: 3),
           Expanded(
             child: Text(
-              '腾讯源不可用，已切到新浪。该源不复权，除权日有跳空',
+              _dataNoticeText() ?? '',
               style: TextStyle(fontSize: 9, color: scheme.onSurfaceVariant),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,

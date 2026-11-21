@@ -10,6 +10,7 @@ import 'package:flutter/services.dart' show rootBundle;
 
 import '../stock/chanlun.dart';
 import '../stock/chart_shapes.dart';
+import '../stock/data_quality.dart';
 import '../stock/stock_bridge.dart';
 import '../stock/shape_store.dart';
 import '../stock/stock_analyzer.dart';
@@ -116,7 +117,11 @@ List<AppTool> buildStockTools({bool enabled = true}) {
         ),
         'count': intProp('取多少根，默认 60，最多 640'),
       }),
-      promptHint: '取到 K 线后先看趋势方向和关键价位，再谈结论；不要凭一根 K 线下判断。',
+      promptHint:
+          '取到 K 线后先看趋势方向和关键价位，再谈结论；不要凭一根 K 线下判断。'
+          '回答里要顺带说清数据来历：`data.source`（腾讯/新浪/东财）、`data.adjust`（前复权 / 不复权）、'
+          '`data.closed` 是不是已收盘。`data.from_cache=true` 说明这不是刚拉的，'
+          '`data.quality.ok=false` 时要把 issues 说出来并给结论打折，别当成干净数据用。',
       execute: (args) async {
         try {
           final symbol = resolveSymbol(args['symbol']);
@@ -185,12 +190,22 @@ List<AppTool> buildStockTools({bool enabled = true}) {
             'name': s.name,
             'period': s.period,
             'total_bars': s.length,
-            'first_date': s.first.t,
-            'last_date': s.last.t,
+            'first_date': displayBarTime(s.period, s.first.t),
+            'last_date': displayBarTime(s.period, s.last.t),
             'ma5': r2(maOf(5)),
             'ma10': r2(maOf(10)),
             'ma20': r2(maOf(20)),
             'ma60': r2(maOf(60)),
+            // 数据来历 + 质量：缺了这三行，「当前价位」就成了无源之水
+            'data': {
+              'source': s.source,
+              'adjust': s.adjust,
+              if (s.fallbackReason != null) 'degraded_reason': s.fallbackReason,
+              ...s.clock.toJson(),
+              'from_cache': s.fromCache,
+              'cache_age': s.cacheAge == null ? null : humanAge(s.cacheAge!),
+              'quality': s.quality.toJson(),
+            },
             'bars': [
               for (final b in bars) {'t': b.t, 'o': b.o, 'h': b.h, 'l': b.l, 'c': b.c, 'v': b.v},
             ],
@@ -262,6 +277,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
             'volume': q.volume,
             'amount': q.amount,
             'time': q.time,
+            // 腾讯给的是 20261120161454 这种 14 位串，直接读没法看
+            'as_of': _fmtStamp14(q.time),
           });
         } catch (e) {
           return jsonEncode({'error': '$e'});
@@ -294,6 +311,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           '5) 哪些条件会支持或推翻当前判断。\n'
           '不要把各周期的买卖信号数一数、加个权——那没有意义。矛盾就直说矛盾。'
           '如果返回里有 bars_adequate=false，说明该周期数据不够，结论要打折扣。'
+          '各级别若 source / adj 不同（比如某一级降级到了新浪的不复权数据），'
+          '不能当成同一口径来比，要说明差异。'
           '多只股票对比要给出横向排序依据，而不是逐只念一遍。',
       execute: (args) async {
         try {
@@ -333,10 +352,15 @@ List<AppTool> buildStockTools({bool enabled = true}) {
                       'period_key': p,
                       'bars': r.series.length,
                       'close': r2(r.series.last.c),
-                      'last_date': r.series.last.t,
+                      'last_date': displayBarTime(p, r.series.last.t),
                       // 数据源与复权口径：跨周期对照时不能把不同源的数据直接拼起来
                       'source': r.series.source,
-                      'adj': r.series.source == 'sina' ? '不复权' : '前复权',
+                      'adj': r.series.adjust,
+                      if (r.series.fallbackReason != null) 'degraded_reason': r.series.fallbackReason,
+                      'closed': r.series.clock.closed,
+                      'data_age': r.series.clock.age == null ? null : humanAge(r.series.clock.age!),
+                      'quality_ok': r.series.quality.ok,
+                      if (r.series.quality.issues.isNotEmpty) 'quality_issues': r.series.quality.issues,
                       // 结构需要足够历史才收敛（实测 400 根起）；不足时结论不稳
                       'bars_adequate': r.series.length >= 400,
                       'trend': trendOf(r.chan.pens),
@@ -706,4 +730,11 @@ List<AppTool> buildStockTools({bool enabled = true}) {
       },
     ),
   ];
+}
+
+/// 腾讯快照时间戳 `20261120161454` → `2026-11-20 16:14:54`。格式不符原样返回。
+String? _fmtStamp14(String? t) {
+  if (t == null || t.length < 14 || int.tryParse(t) == null) return t;
+  return '${t.substring(0, 4)}-${t.substring(4, 6)}-${t.substring(6, 8)} '
+      '${t.substring(8, 10)}:${t.substring(10, 12)}:${t.substring(12, 14)}';
 }

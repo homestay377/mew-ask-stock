@@ -15,6 +15,7 @@ import 'dart:typed_data';
 import 'package:gbk_codec/gbk_codec.dart';
 
 import 'chanlun.dart';
+import 'data_quality.dart';
 import 'minute.dart';
 import 'numbers.dart';
 import 'stock_fundamental.dart';
@@ -38,7 +39,11 @@ class KlineSeries {
     required this.period,
     required this.bars,
     this.source = 'tencent',
-  });
+    this.fallbackReason,
+    DateTime? fetchedAt,
+    this.fromCache = false,
+    this.cacheAge,
+  }) : fetchedAt = fetchedAt ?? DateTime.now();
 
   final String symbol;
   final String name;
@@ -47,18 +52,89 @@ class KlineSeries {
   final String period;
   final List<Bar> bars;
 
-  /// 数据来源：`tencent`（前复权）或 `sina`（不复权，备源）。
+  /// 数据来源：`tencent`（前复权）、`sina`（不复权，备源）、`eastmoney`（前复权）。
   /// 备源时除权日附近会有跳空，缠论可能因此多出假信号，值得在摘要里提一句。
   final String source;
 
+  /// 走备源时的降级原因（主源报了什么错）。主源成功时为 null。
+  /// 这不是给人看的报错弹窗，是给分析层判断「要不要打折」的依据。
+  final String? fallbackReason;
+
+  /// 这批数据**真正从网络拉到的时刻**。缓存命中时不会被改写成读缓存的时刻，
+  /// 否则「数据有多旧」就永远看不出来了。
+  final DateTime fetchedAt;
+
+  /// true = 来自内存/磁盘缓存，不是刚刚拉的。
+  final bool fromCache;
+
+  /// 缓存命中时的数据年龄；直接从网络拿的是 null。
+  final Duration? cacheAge;
+
   bool get isFallback => source != 'tencent';
 
+  /// 复权口径。**不同口径的序列不能直接拼接**——不复权的序列在除权日会有跳空。
+  String get adjust => switch (source) {
+    'sina' => '不复权',
+    _ => '前复权',
+  };
+
+  /// 数据质量体检，惰性算一次（O(n)，640 根也就几十微秒）。
+  KlineQuality get quality => _quality ??= assessBars(bars, period);
+  KlineQuality? _quality;
+
+  /// 最后一根 K 线的时间状态（收没收盘、多旧）。
+  BarClock get clock => barClock(period, bars.isEmpty ? '' : bars.last.t);
+
+  /// 缓存命中时用它打标，fetchedAt 原样保留。
+  KlineSeries asCached(Duration age) => KlineSeries(
+    symbol: symbol,
+    name: name,
+    period: period,
+    bars: bars,
+    source: source,
+    fallbackReason: fallbackReason,
+    fetchedAt: fetchedAt,
+    fromCache: true,
+    cacheAge: age,
+  ).._quality = _quality;
+
+  /// 给降级结果补上原因，其它原样。
+  KlineSeries withFallback(String? reason) => KlineSeries(
+    symbol: symbol,
+    name: name,
+    period: period,
+    bars: bars,
+    source: source,
+    fallbackReason: reason,
+    fetchedAt: fetchedAt,
+    fromCache: fromCache,
+    cacheAge: cacheAge,
+  ).._quality = _quality;
+
+  /// 一句话描述数据来历，摘要里直接用。
+  /// 例：`腾讯 · 前复权 · 最后一根 2026-11-20 已收盘 · 拉取于 2 分钟前`
+  String get provenance {
+    final parts = <String>['$source · $adjust', clock.note];
+    if (fromCache && cacheAge != null) {
+      parts.add('读的是 ${humanAge(cacheAge!)}写入的缓存，不是刚拉的');
+    } else {
+      parts.add('拉取于 ${humanAge(DateTime.now().difference(fetchedAt))}');
+    }
+    if (fallbackReason != null) {
+      parts.add('主源失败已降级：$fallbackReason');
+    }
+    return parts.join(' · ');
+  }
+
   /// 存盘用：bars 压成数组，比对象省一半以上体积。
+  /// `fetchedAt` 必须存：不然冷启动读缓存时，分不清这是刚拉的还是三天前的。
   Map<String, dynamic> toDisk() => {
     'symbol': symbol,
     'name': name,
     'period': period,
     'source': source,
+    'fetchedAt': fetchedAt.toUtc().toIso8601String(),
+    if (fallbackReason != null) 'fallbackReason': fallbackReason,
     'bars': [
       for (final b in bars) [b.t, b.o, b.h, b.l, b.c, b.v],
     ],
@@ -85,6 +161,9 @@ class KlineSeries {
       period: '${j['period'] ?? 'day'}',
       bars: bars,
       source: '${j['source'] ?? 'tencent'}',
+      fallbackReason: j['fallbackReason']?.toString(),
+      // 老缓存没有这个字段 → null，读出来会标成「拉取时间未知」
+      fetchedAt: DateTime.tryParse('${j['fetchedAt'] ?? ''}'),
     );
   }
 
@@ -285,7 +364,10 @@ class StockSource {
       () => _klineEastmoney(code, p, count),
     ]) {
       try {
-        return await fetcher();
+        final s = await fetcher();
+        // 降级成功也要留痕：主源挂了这件事必须传到分析层，
+        // 不然模型会把「新浪不复权数据」当成腾讯的连续序列来解读。
+        return errors.isEmpty ? s : s.withFallback(errors.join('；'));
       } catch (e) {
         errors.add('$e');
       }
@@ -657,6 +739,7 @@ class StockSource {
     String period = 'day',
     int count = chanBarCount,
     void Function(KlineSeries fresh)? onRefresh,
+    void Function(String error)? onRefreshFailed,
   }) async {
     final code = normalize(symbol);
     final key = '$code|$period|$count';
@@ -664,19 +747,21 @@ class StockSource {
     // 1) 内存命中且新鲜
     final hit = _cache[key];
     if (hit != null) {
-      final age = DateTime.now().difference(hit.at).inMilliseconds;
-      if (age < _freshMs) return hit.series!;
+      final age = _dataAge(hit.series!, hit.at);
+      if (age.inMilliseconds < _freshMs) return hit.series!.asCached(age);
       // 2) 内存有旧值：先给旧的，后台刷新
-      _refreshInBackground(key, code, period, count, onRefresh);
-      return hit.series!;
+      _refreshInBackground(key, code, period, count, onRefresh, onRefreshFailed);
+      return hit.series!.asCached(age);
     }
 
     // 3) 磁盘缓存：先给旧的，后台刷新
     final disk = await _readDisk(code, period, count);
     if (disk != null) {
       _cache[key] = _CacheEntry(disk, DateTime.now());
-      _refreshInBackground(key, code, period, count, onRefresh);
-      return disk;
+      _refreshInBackground(key, code, period, count, onRefresh, onRefreshFailed);
+      // 数据年龄按 **拉取时间** 算，不是按读盘时间算——
+      // 否则冷启动读三天前的缓存也会显示成「刚更新」。
+      return disk.asCached(_dataAge(disk, DateTime.now()));
     }
 
     // 4) 走网络
@@ -686,17 +771,38 @@ class StockSource {
     return fresh;
   }
 
-  /// 后台刷新，不阻塞调用方。失败静默（旧数据仍然可用）。
-  void _refreshInBackground(String key, String code, String period, int count, void Function(KlineSeries)? onRefresh) {
+  /// 最近一次后台刷新失败的原因。null = 没失败过（或还没刷新过）。
+  /// 界面读它来区分「实时数据」和「陈旧缓存」，不要自己猜。
+  String? lastRefreshError;
+
+  /// 数据年龄：以真实拉取时间为准，取不到就退回缓存写入时间。
+  Duration _dataAge(KlineSeries s, DateTime fallbackAt) {
+    final d = DateTime.now().difference(s.fetchedAt);
+    if (d.isNegative || d.inDays > 3650) return DateTime.now().difference(fallbackAt);
+    return d;
+  }
+
+  /// 后台刷新，不阻塞调用方。失败时记下原因（旧数据仍然可用），
+  /// 但不把旧数据伪装成新的——[KlineSeries.fromCache] 已经标明它是缓存。
+  void _refreshInBackground(
+    String key,
+    String code,
+    String period,
+    int count,
+    void Function(KlineSeries)? onRefresh,
+    void Function(String error)? onRefreshFailed,
+  ) {
     unawaited(
       kline(code, period: period, count: count)
           .then((s) {
             _put(key, s);
+            lastRefreshError = null;
             unawaited(_writeDisk(code, period, count, s));
             onRefresh?.call(s);
           })
-          .catchError((Object _) {
-            // 后台刷新失败就算了，用户手上还有旧数据
+          .catchError((Object e) {
+            lastRefreshError = '$e';
+            onRefreshFailed?.call('$e');
           }),
     );
   }

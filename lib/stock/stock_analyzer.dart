@@ -5,6 +5,7 @@
 library;
 
 import 'chanlun.dart';
+import 'data_quality.dart';
 import 'numbers.dart';
 import 'stock_fundamental.dart';
 import 'stock_source.dart';
@@ -25,6 +26,16 @@ class StockAnalysis {
     'name': series.name,
     'period': series.period,
     'bars': series.length,
+    // 数据来历与质量：模型引用结论前必须能看到这些，不能只给干净的数字
+    'data': {
+      'source': series.source,
+      'adjust': series.adjust,
+      if (series.fallbackReason != null) 'degraded_reason': series.fallbackReason,
+      ...series.clock.toJson(),
+      'from_cache': series.fromCache,
+      'cache_age': series.cacheAge == null ? null : humanAge(series.cacheAge!),
+      'quality': series.quality.toJson(),
+    },
     'last': {
       'date': series.last.t,
       'open': series.last.o,
@@ -87,10 +98,20 @@ class StockAnalyzer {
 
     b.writeln('【${s.name} ${s.symbol} · ${periodName(s.period)}】');
     b.writeln(
-      'K 线 ${s.length} 根（${s.first.t} 至 ${last.t}），'
+      'K 线 ${s.length} 根（${displayBarTime(s.period, s.first.t)} 至 ${displayBarTime(s.period, last.t)}），'
       '最新 ${fmtNum(last.c)}，'
       '开 ${fmtNum(last.o)} 高 ${fmtNum(last.h)} 低 ${fmtNum(last.l)}',
     );
+
+    // 数据来历写在结构前面：读者要先知道「这份数据可信到什么程度」
+    b.writeln('数据：${s.provenance}');
+    final q = s.quality;
+    if (!q.ok) {
+      b.writeln('⚠ 数据质量存疑，下面的结构判断要打折：');
+      for (final issue in q.issues) {
+        b.writeln('  · $issue');
+      }
+    }
 
     b.writeln('笔 ${r.pens.length} 个，中枢 ${r.boxes.length} 个');
 
