@@ -531,13 +531,39 @@ class Chanlun {
       );
     }
 
-    for (final sg in signals) {
-      ChanBox? lastBoxAt;
+    /// 找信号发生时「最近的那个」中枢。
+    ///
+    /// ★ 判据是 `s <= idx`（中枢已经开始形成），**不是** `e <= idx`。
+    ///   中枢的 `e` 是事后才确定的右边界，信号可能正好落在它的形成过程中
+    ///   （实测 idx=452 时 [387-485] 正在形成，用 `e<=idx` 会把它排除，
+    ///   于是回头去引用已经过去 130 根的 [27-386]，结论就失去了实战意义）。
+    ///
+    /// ★ 也**不能**简单遍历取列表里最后一个满足条件的：`boxes` 按起点排序没错，
+    ///   但如果不显式比较 `s`，逻辑一旦改动就会拿错。
+    ChanBox? boxActiveAt(int idx) {
+      ChanBox? best;
       for (final bx in boxes) {
-        if (bx.e <= sg.idx) lastBoxAt = bx;
+        if (bx.s > idx) continue;
+        if (best == null || bx.s > best.s) best = bx;
       }
+      return best;
+    }
 
-      if (sg.type == 'buy' && lastBoxAt != null && sg.price < lastBoxAt.zd) {
+    /// 信号价离中枢边界是否还算「贴着」。
+    ///
+    /// 三买的定义是「突破中枢后回抽不跌回 ZG」。如果价格已经跑到 ZG 上方两三倍
+    /// 中枢高度的位置，那早就是另一个结构了，再回头说「不回 ZG」没有意义。
+    /// 这里用中枢高度的 1.5 倍作为上限。
+    bool nearBoundary(double price, double boundary, double boxHeight) {
+      if (boxHeight <= 0) return true;
+      return (price - boundary).abs() <= boxHeight * 1.5;
+    }
+
+    for (final sg in signals) {
+      final lastBoxAt = boxActiveAt(sg.idx);
+      final h = lastBoxAt == null ? 0.0 : (lastBoxAt.zg - lastBoxAt.zd);
+
+      if (sg.type == 'buy' && lastBoxAt != null && sg.price < lastBoxAt.zd && nearBoundary(sg.price, lastBoxAt.zd, h)) {
         // 一买：中枢下方的底背驰
         pushPoint(sg.idx, '一买', sg.price, '下跌笔在中枢下方底背驰，力度衰减 ${sg.strength}（中枢 ZD=${_fmt2(lastBoxAt.zd)}）', lastBoxAt);
 
@@ -554,12 +580,15 @@ class Chanlun {
         }
       }
 
-      // 三买：价格在最后一个中枢上方，回调不跌回 ZG
-      if (sg.type == 'buy' && lastBoxAt != null && sg.price > lastBoxAt.zg) {
+      // 三买：价格在最后一个中枢上方，且没有离得太远
+      if (sg.type == 'buy' && lastBoxAt != null && sg.price > lastBoxAt.zg && nearBoundary(sg.price, lastBoxAt.zg, h)) {
         pushPoint(sg.idx, '三买', sg.price, '中枢上方回抽不破 ZG=${_fmt2(lastBoxAt.zg)}，底背驰力度 ${sg.strength}', lastBoxAt);
       }
 
-      if (sg.type == 'sell' && lastBoxAt != null && sg.price > lastBoxAt.zg) {
+      if (sg.type == 'sell' &&
+          lastBoxAt != null &&
+          sg.price > lastBoxAt.zg &&
+          nearBoundary(sg.price, lastBoxAt.zg, h)) {
         pushPoint(sg.idx, '一卖', sg.price, '上涨笔在中枢上方顶背驰，力度衰减 ${sg.strength}（中枢 ZG=${_fmt2(lastBoxAt.zg)}）', lastBoxAt);
 
         final afterIdx2 = sg.idx;
@@ -574,7 +603,10 @@ class Chanlun {
         }
       }
 
-      if (sg.type == 'sell' && lastBoxAt != null && sg.price < lastBoxAt.zd) {
+      if (sg.type == 'sell' &&
+          lastBoxAt != null &&
+          sg.price < lastBoxAt.zd &&
+          nearBoundary(sg.price, lastBoxAt.zd, h)) {
         pushPoint(sg.idx, '三卖', sg.price, '中枢下方反抽不上 ZD=${_fmt2(lastBoxAt.zd)}，顶背驰力度 ${sg.strength}', lastBoxAt);
       }
     }

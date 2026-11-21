@@ -16,6 +16,7 @@ import 'package:gbk_codec/gbk_codec.dart';
 
 import 'chanlun.dart';
 import 'minute.dart';
+import 'stock_fundamental.dart';
 import 'stock_search.dart';
 
 /// 取数失败。消息面向用户，不要暴露堆栈。
@@ -107,6 +108,11 @@ class Quote {
     required this.volume,
     this.amount,
     this.time,
+    this.pe,
+    this.pb,
+    this.turnover,
+    this.floatCap,
+    this.totalCap,
   });
 
   final String symbol;
@@ -119,6 +125,17 @@ class Quote {
   final double volume;
   final double? amount;
   final String? time;
+
+  /// 估值（腾讯快照里有，东财备源拿不到时为 null）。
+  final double? pe;
+  final double? pb;
+
+  /// 换手率（%）
+  final double? turnover;
+
+  /// 流通市值 / 总市值，单位「亿」。
+  final double? floatCap;
+  final double? totalCap;
 
   double get change => price - prevClose;
   double get changePct => prevClose == 0 ? 0 : (price - prevClose) / prevClose * 100;
@@ -485,6 +502,18 @@ class StockSource {
     final f = m.group(1)!.split('~');
     if (f.length < 40) throw StockDataError('腾讯快照字段不足');
 
+    // 字段索引是实测出来的，不要凭印象改：
+    //   [38] 换手率%  [39] 市盈率TTM  [44] 流通市值(亿)  [45] 总市值(亿)  [46] 市净率
+    //
+    // 估值这几个字段，0 要当成「没有」：ETF/指数的 PB 接口给的是 0.00，
+    // 显示成 0 倍市盈率会误导（金融上不存在 0 倍）。
+    double? ratio(int i) {
+      final v = i < f.length ? _d(f[i]) : null;
+      return (v == null || v == 0) ? null : v;
+    }
+
+    double? at(int i) => i < f.length ? _d(f[i]) : null;
+
     return Quote(
       symbol: code,
       name: f[1],
@@ -496,6 +525,11 @@ class StockSource {
       volume: (_d(f[6]) ?? 0) * 100, // 手 -> 股
       amount: (_d(f[37]) ?? 0) * 10000, // 万元 -> 元
       time: f[30],
+      pe: ratio(39),
+      pb: ratio(46),
+      turnover: ratio(38),
+      floatCap: ratio(44),
+      totalCap: ratio(45),
     );
   }
 
@@ -784,6 +818,164 @@ class StockSource {
 
   /// 缓存是否已过期到需要后台刷新（10 分钟内不算过期）。
   int get minuteFreshMs => _minuteFreshMs;
+
+  // ------------------------------------------------------------ 基本面
+
+  /// 东财 secid：沪市前缀 1，深市/北交所前缀 0。
+  /// 东财 datacenter 的 SECUCODE：`300274.SZ` / `600519.SH` / `430047.BJ`。
+  ///
+  /// ★ 必须用 SECUCODE 而不是 SECURITY_CODE：后者不带市场，
+  ///   `000001` 会同时匹配到上证指数和平安银行，指数被查出一堆财报数据。
+  static String _emSecucode(String code) {
+    final suffix = switch (code.substring(0, 2)) {
+      'sh' => 'SH',
+      'bj' => 'BJ',
+      _ => 'SZ',
+    };
+    return '${code.substring(2)}.$suffix';
+  }
+
+  static String _emSecid(String code) => '${code.startsWith('sh') ? '1' : '0'}.${code.substring(2)}';
+
+  /// 取一只股票的估值、财报、龙虎榜。
+  ///
+  /// 三部分互相独立：某一部分失败不影响其他部分，失败原因记在 [Fundamental.note]。
+  Future<Fundamental> fundamental(String symbol) async {
+    final code = normalize(symbol);
+    final results = await Future.wait([_valuation(code), _reports(code), _boards(code)]);
+    final val = results[0] as Valuation?;
+    final reports = results[1] as List<Report>;
+    final boards = results[2] as List<BillBoard>;
+
+    final notes = <String>[];
+    if (val == null || val.isEmpty) notes.add('估值数据拿不到（涨幅/停牌原因，或该标的不适用）');
+    if (reports.isEmpty) notes.add('没有财报数据（ETF、指数、或上市不足一期）');
+    if (boards.isEmpty) notes.add('近期没有上龙虎榜记录');
+
+    // 名称优先用财报里的，其次估值接口
+    var name = code;
+    try {
+      final q = await quoteCached(code);
+      if (q.name.isNotEmpty && q.name != code) name = q.name;
+    } catch (_) {}
+
+    return Fundamental(
+      symbol: code,
+      name: name,
+      valuation: val,
+      reports: reports,
+      boards: boards,
+      note: notes.isEmpty ? null : notes.join('；'),
+    );
+  }
+
+  /// 估值。
+  ///
+  /// **从腾讯快照取**，不用东财 push2：后者实测会返回 502（服务端故障），
+  /// 而腾讯快照本来就带这些字段，且和东财的数值一致
+  /// （对比 300274：PB 都是 2.95、总市值都是 1459.7 亿）。
+  Future<Valuation?> _valuation(String code) async {
+    try {
+      final q = await quoteCached(code);
+      if (q.pe == null && q.pb == null && q.totalCap == null && q.floatCap == null) {
+        return null;
+      }
+      return Valuation(
+        pe: q.pe,
+        pb: q.pb,
+        // 腾讯给的单位是「亿」，统一换算成「元」方便和其他数字一起格式化
+        totalCap: q.totalCap == null ? null : q.totalCap! * 1e8,
+        floatCap: q.floatCap == null ? null : q.floatCap! * 1e8,
+        turnover: q.turnover,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 财报。只取报告期口径的字段。
+  Future<List<Report>> _reports(String code) async {
+    try {
+      // ★ 不能带 sortColumns=REPORT_DATE：该列不存在，接口会报 9501。
+      //   默认返回已经按报告期倒序。
+      final body = await _text(
+        'https://datacenter-web.eastmoney.com/api/data/v1/get'
+        '?reportName=RPT_LICO_FN_CPD&columns=ALL'
+        '&filter=(SECUCODE%3D%22${_emSecucode(code)}%22)&pageSize=4&pageNumber=1',
+      );
+      final root = jsonDecode(body);
+      final result = root is Map ? root['result'] : null;
+      final rows = result is Map ? result['data'] : null;
+      if (rows is! List) return const [];
+
+      final out = <Report>[];
+      for (final r in rows) {
+        if (r is! Map) continue;
+        final date = r['REPORTDATE']?.toString() ?? '';
+        if (date.isEmpty) continue;
+        out.add(
+          Report(
+            period: date.length >= 10 ? date.substring(0, 10) : date,
+            eps: _d(r['BASIC_EPS']),
+            revenue: _d(r['TOTAL_OPERATE_INCOME']),
+            revenueYoy: _d(r['YSTZ']),
+            netProfit: _d(r['PARENT_NETPROFIT']),
+            netProfitYoy: _d(r['SJLTZ']),
+            grossMargin: _d(r['XSMLL']),
+            roe: _d(r['WEIGHTAVG_ROE']),
+            bps: _d(r['BPS']),
+            cashPerShare: _d(r['MGJYXJJE']),
+          ),
+        );
+      }
+      return out;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// 龙虎榜。
+  Future<List<BillBoard>> _boards(String code) async {
+    try {
+      final body = await _text(
+        'https://datacenter-web.eastmoney.com/api/data/v1/get'
+        '?reportName=RPT_DAILYBILLBOARD_DETAILSNEW&columns=ALL'
+        '&filter=(SECUCODE%3D%22${_emSecucode(code)}%22)&pageSize=5'
+        '&sortColumns=TRADE_DATE&sortTypes=-1',
+      );
+      final root = jsonDecode(body);
+      final result = root is Map ? root['result'] : null;
+      final rows = result is Map ? result['data'] : null;
+      if (rows is! List) return const [];
+
+      final out = <BillBoard>[];
+      for (final r in rows) {
+        if (r is! Map) continue;
+        final date = r['TRADE_DATE']?.toString() ?? '';
+        if (date.isEmpty) continue;
+        out.add(
+          BillBoard(
+            date: date.length >= 10 ? date.substring(0, 10) : date,
+            close: _d(r['CLOSE_PRICE']),
+            changePct: _d(r['CHANGE_RATE']),
+            buyAmt: _d(r['BILLBOARD_BUY_AMT']),
+            sellAmt: _d(r['BILLBOARD_SELL_AMT']),
+            dealAmt: _d(r['BILLBOARD_DEAL_AMT']),
+            ratio: _d(r['DEAL_AMOUNT_RATIO']),
+            reason: r['EXPLANATION']?.toString(),
+            explain: r['EXPLAIN']?.toString(),
+            next1: _d(r['D1_CLOSE_ADJCHRATE']),
+            next2: _d(r['D2_CLOSE_ADJCHRATE']),
+            next5: _d(r['D5_CLOSE_ADJCHRATE']),
+            next10: _d(r['D10_CLOSE_ADJCHRATE']),
+          ),
+        );
+      }
+      return out;
+    } catch (_) {
+      return const [];
+    }
+  }
 
   // ------------------------------------------------------------ 多级别
 

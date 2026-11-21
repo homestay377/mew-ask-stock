@@ -12,6 +12,7 @@ import '../stock/chart_shapes.dart';
 import '../stock/stock_bridge.dart';
 import '../stock/shape_store.dart';
 import '../stock/stock_analyzer.dart';
+import '../stock/stock_fundamental.dart';
 import '../stock/stock_source.dart';
 import 'tool.dart';
 
@@ -287,6 +288,72 @@ List<AppTool> buildStockTools({bool enabled = true}) {
             'symbol': code,
             'period': period ?? 'unchanged',
             'note': 'K 线面板已切到该标的，用户现在能看到这张图',
+          });
+        } catch (e) {
+          return jsonEncode({'error': '$e'});
+        }
+      },
+    ),
+
+    AppTool(
+      name: 'get_fundamental',
+      displayName: '基本面',
+      description:
+          '取一只股票的估值、财报、龙虎榜。\n'
+          '  · 估值：PE(TTM)、PB、总市值、流通市值、换手率\n'
+          '  · 财报：最近 4 期，营收/净利及同比、毛利率、ROE、EPS\n'
+          '  · 龙虎榜：最近 5 次上榜，买卖额、上榜原因、机构动向、上榜后 5/10 日表现\n'
+          '要判断「贵不贵」「业绩好不好」「有没有资金关注」就用它。\n'
+          '⚠ 同比都是「去年同期」的报告期口径，不要说成环比。',
+      parameters: objectSchema({'symbol': strProp('股票代码。不传则取面板当前标的')}),
+      promptHint: '报表数字要带单位和报告期。ROE、毛利率这类比率要和同业比才有意义，不要孤立地说好坏。',
+      execute: (args) async {
+        try {
+          final symbol = resolveSymbol(args['symbol']);
+          if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
+          final f = await source.fundamental(symbol);
+          return jsonEncode({
+            'summary': renderFundamental(f),
+            'detail': {
+              'symbol': f.symbol,
+              'name': f.name,
+              'valuation': f.valuation == null
+                  ? null
+                  : {
+                      'pe_ttm': f.valuation!.pe,
+                      'pb': f.valuation!.pb,
+                      'total_cap': f.valuation!.totalCap,
+                      'float_cap': f.valuation!.floatCap,
+                      'turnover_pct': f.valuation!.turnover,
+                    },
+              'reports': [
+                for (final r in f.reports)
+                  {
+                    'period': r.period,
+                    'eps': r.eps,
+                    'revenue': r.revenue,
+                    'revenue_yoy_pct': r.revenueYoy,
+                    'net_profit': r.netProfit,
+                    'net_profit_yoy_pct': r.netProfitYoy,
+                    'gross_margin_pct': r.grossMargin,
+                    'roe_pct': r.roe,
+                  },
+              ],
+              'boards': [
+                for (final b in f.boards)
+                  {
+                    'date': b.date,
+                    'close': b.close,
+                    'change_pct': b.changePct,
+                    'buy_amt': b.buyAmt,
+                    'sell_amt': b.sellAmt,
+                    'ratio_pct': b.ratio,
+                    'reason': b.reason,
+                    'explain': b.explain,
+                  },
+              ],
+              if (f.note != null) 'note': f.note,
+            },
           });
         } catch (e) {
           return jsonEncode({'error': '$e'});
