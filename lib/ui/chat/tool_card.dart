@@ -433,7 +433,12 @@ class _SubAgentTrace extends StatelessWidget {
       for (final e in results) {
         if (e is! Map) continue;
         out.add(
-          _SubAgentRow(label: asStr(e['agent']), ok: e['ok'] == true, detail: _detail(e), text: asStr(e['output'])),
+          _SubAgentRow(
+            label: asStr(e['agent']),
+            ok: e['ok'] == true,
+            detail: _detail(asMap(e)),
+            text: asStr(e['output']),
+          ),
         );
       }
     }
@@ -445,7 +450,7 @@ class _SubAgentTrace extends StatelessWidget {
           _SubAgentRow(
             label: '${t('第', 'Round')} ${e['round']} · ${asStr(e['agent'])}',
             ok: e['ok'] == true,
-            detail: _detail(e),
+            detail: _detail(asMap(e)),
             text: asStr(e['output']),
           ),
         );
@@ -454,7 +459,7 @@ class _SubAgentTrace extends StatelessWidget {
     return out;
   }
 
-  String _detail(Map e) {
+  String _detail(Map<String, dynamic> e) {
     final steps = e['steps'];
     final n = steps is List ? steps.length : 0;
     final ms = e['ms'] is num ? (e['ms'] as num).toInt() : 0;
