@@ -29,11 +29,21 @@ class FormulaError {
 
 /// 公式执行结果。[data] 为「已清洗」序列：NaN → 0，±Inf → ±1e18。
 class FormulaResult {
-  FormulaResult(this.data, this.errors, this.bars);
+  FormulaResult(this.data, this.errors, this.bars, {this.unknownFunctions = const []});
 
   final Map<String, Float64List> data;
   final List<FormulaError> errors;
   final int bars;
+
+  /// 公式里出现过、但解释器没实现的函数名（去重、排序）。
+  ///
+  /// 这些函数一律返回全 NaN——不会中断整条公式（通达信函数太多，
+  /// 全都直接报错会让常用公式也跑不了），但**必须让调用方知道**：
+  /// 之前是静默忽略的，公式打错字或用了未支持函数时，
+  /// 结果会是一串 NaN 而看不出任何异常。
+  final List<String> unknownFunctions;
+
+  bool get hasUnknownFunctions => unknownFunctions.isNotEmpty;
 }
 
 const double _infHuge = 1e18;
@@ -620,10 +630,14 @@ Float64List _sumImpl(Float64List x, double Function(int) kAt) {
 // -------------------------------------------------------------- 执行器
 
 class _Ctx {
-  _Ctx(this.n, this.data);
+  _Ctx(this.n, this.data, this.unknown);
 
   final int n;
   final Map<String, Float64List> data;
+
+  /// 收集未实现的函数名。挂在 ctx 上而不是用全局变量：
+  /// 并发调用（面板 + AI 工具同时算）时全局 Set 会串数据。
+  final Set<String> unknown;
 
   Float64List? get(String name) {
     final direct = data[name];
@@ -876,7 +890,9 @@ Float64List _callFn(String name, List<_Node> args, _Ctx ctx) {
       return _nanArr(n);
     default:
       if (_decorative.contains(name)) return _nanArr(n);
-      // 未实现函数（NAMELIKE/CODELIKE/ZTPRICE/DATE/...）：静默 NaN，不中断整条公式
+      // 未实现函数（NAMELIKE/CODELIKE/ZTPRICE/DATE/...）：返回 NaN 但不中断公式，
+      // 同时记录名字，交给调用方提示用户。
+      ctx.unknown.add(name);
       return _nanArr(n);
   }
 }
@@ -987,14 +1003,15 @@ final RegExp _commentRe = RegExp(r'\{[\s\S]*?}');
 FormulaResult runFormula(String text, Map<String, Float64List> ohlcv) {
   final close = ohlcv['c'] ?? ohlcv['CLOSE'] ?? ohlcv['C'];
   if (close == null) {
-    return FormulaResult({}, [FormulaError(0, '', '缺少收盘价序列')], 0);
+    return FormulaResult({}, [FormulaError(0, '', '缺少收盘价序列')], 0, unknownFunctions: const []);
   }
   final n = close.length;
   final data = <String, Float64List>{};
   for (final e in ohlcv.entries) {
     data[e.key.toUpperCase()] = e.value;
   }
-  final ctx = _Ctx(n, data);
+  final unknown = <String>{};
+  final ctx = _Ctx(n, data, unknown);
   final errors = <FormulaError>[];
 
   // ★ 先全局剥掉 {注释}（可跨行），再按 ';' 切句
@@ -1058,5 +1075,6 @@ FormulaResult runFormula(String text, Map<String, Float64List> ohlcv) {
     }
     clean[entry.key] = dst;
   }
-  return FormulaResult(clean, errors, n);
+  final unknownSorted = unknown.toList()..sort();
+  return FormulaResult(clean, errors, n, unknownFunctions: unknownSorted);
 }

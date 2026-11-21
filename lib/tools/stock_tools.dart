@@ -13,6 +13,7 @@ import '../stock/stock_bridge.dart';
 import '../stock/shape_store.dart';
 import '../stock/stock_analyzer.dart';
 import '../stock/numbers.dart';
+import '../stock/period_resolver.dart';
 import '../stock/stock_fundamental.dart';
 import '../stock/stock_source.dart';
 import 'tool.dart';
@@ -35,6 +36,10 @@ double? _num(Object? v) {
   if (d == null || !d.isFinite) return null;
   return d;
 }
+
+/// 各工具支持的周期。顺序里 day 放第一位，作为最终兜底。
+const kChartPeriods = ['day', 'week', 'month', 'm60', 'm30', 'm15', 'm5', 'minute'];
+const kAnalysisPeriods = ['day', 'week', 'month', 'm60', 'm30', 'm15'];
 
 /// 解析工具要分析哪只股票。
 ///
@@ -75,7 +80,7 @@ List<AppTool> buildStockTools({bool enabled = true}) {
       parameters: objectSchema({
         'symbol': strProp('股票代码，如 300274 / sh510300 / sh000001。不传则分析面板当前标的'),
         'period': strProp(
-          '周期：day/week/month/m60/m30/m15/m5/minute（分时），默认 day',
+          '周期：day/week/month/m60/m30/m15/m5/minute（分时）。不传则沿用面板当前周期',
           enumValues: ['day', 'week', 'month', 'm60', 'm30', 'm15', 'm5', 'minute'],
         ),
         'count': intProp('取多少根，默认 60，最多 640'),
@@ -85,7 +90,14 @@ List<AppTool> buildStockTools({bool enabled = true}) {
         try {
           final symbol = resolveSymbol(args['symbol']);
           if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
-          final period = '${args['period'] ?? 'day'}';
+          final pr = resolvePeriod(
+            explicit: args['period'],
+            panel: panelPeriod(),
+            allowed: kChartPeriods,
+            toolLabel: 'stock_kline',
+          );
+          if (!pr.isOk) return jsonEncode({'error': pr.error});
+          final period = pr.value!;
 
           // 分时：结构完全不同（按时间等分，没有 OHLC），单独处理。
           // 241 个点全返回会吃掉大量 token，所以只给摘要 + 每 15 分钟采样。
@@ -178,7 +190,15 @@ List<AppTool> buildStockTools({bool enabled = true}) {
         try {
           final symbol = resolveSymbol(args['symbol']);
           if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
-          final period = '${args['period'] ?? 'day'}';
+          final pr = resolvePeriod(
+            explicit: args['period'],
+            panel: panelPeriod(),
+            allowed: kAnalysisPeriods,
+            toolLabel: 'analyze_chan',
+          );
+          // 面板停在分时 / m5 时明确告知，而不是偷偷切成日线
+          if (!pr.isOk) return jsonEncode({'error': pr.error});
+          final period = pr.value!;
           final az = await analyzer();
           final r = await az.analyze(symbol, period: period);
           return jsonEncode({'summary': r.summary, 'detail': r.toJson()});
@@ -418,7 +438,7 @@ List<AppTool> buildStockTools({bool enabled = true}) {
       parameters: objectSchema(
         {
           'symbols': strProp('股票代码，多只用逗号分隔，如 300274,600519,000001，最多 20 只'),
-          'period': strProp('分析周期，默认 day', enumValues: ['day', 'week', 'm60', 'm30', 'm15']),
+          'period': strProp('分析周期，默认 day（批量扫描统一用一个周期，不跟随面板）', enumValues: ['day', 'week', 'm60', 'm30', 'm15']),
         },
         required: ['symbols'],
       ),
@@ -521,7 +541,14 @@ List<AppTool> buildStockTools({bool enabled = true}) {
         try {
           final symbol = resolveSymbol(args['symbol']);
           if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
-          final period = '${args['period'] ?? 'day'}';
+          final pr = resolvePeriod(
+            explicit: args['period'],
+            panel: panelPeriod(),
+            allowed: kAnalysisPeriods,
+            toolLabel: 'chart_annotate',
+          );
+          if (!pr.isOk) return jsonEncode({'error': pr.error});
+          final period = pr.value!;
           final raw = args['shapes'];
           if (raw is! List || raw.isEmpty) return jsonEncode({'error': 'shapes 不能为空'});
 

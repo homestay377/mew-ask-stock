@@ -2,7 +2,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+
+import 'dart:typed_data';
+
 import 'package:mewhub/stock/chanlun.dart';
+import 'package:mewhub/stock/tdx_formula.dart';
 
 /// 缠论引擎回归测试。
 ///
@@ -101,6 +105,56 @@ void main() {
     }
     expect(boxesAt[270], lessThan(boxesAt[640]!), reason: '270 根应明显少于全量的中枢数');
     expect(boxesAt[400], boxesAt[640]!, reason: '400 根起结果已收敛，与全量一致');
+  });
+
+  test('截断回放：早期信号的级别不因后续数据而改变（未来数据回归）', () {
+    // 这是修过的一个真实 bug：原来用 boxes.length（全历史最终中枢数）判级别，
+    // 信号发生在 idx=123 时会把之后才形成的 2 个中枢也数进去，
+    // 于是「笔背驰」被错标成「趋势背驰」。
+    final full = Chanlun.analyze(bars, formula);
+
+    // 逐个信号，用「信号之后不远」的截断点重算，级别必须一致
+    for (final sig in full.signals) {
+      final t = sig.idx + 5;
+      if (t >= bars.length) continue;
+      final partial = Chanlun.analyze(bars.sublist(0, t), formula);
+      final hit = partial.signals.where((x) => x.idx == sig.idx).toList();
+      if (hit.isEmpty) continue; // 窗口太小时信号可能还没形成，不算失败
+      expect(hit.first.level, sig.level, reason: 'idx=${sig.idx} 在截断 $t 和全量下级别不一致，说明用了未来数据');
+      expect(hit.first.type, sig.type, reason: 'idx=${sig.idx} 类型不一致');
+      expect(hit.first.strength, sig.strength, reason: 'idx=${sig.idx} 力度不一致');
+    }
+  });
+
+  test('公式包含未来函数，必须记录下来（不静默）', () {
+    final r = Chanlun.analyze(bars, formula);
+    // 真实公式里 NAMELIKE/CODELIKE/ZTPRICE/DTPRICE 未实现
+    expect(r.unknownFunctions, isNotEmpty, reason: '未实现函数必须上报，否则公式写错了也看不出来');
+    expect(r.unknownFunctions, contains('NAMELIKE'));
+  });
+
+  test('未知函数不中断整条公式，但会被记录', () {
+    final small = [for (var i = 0; i < 30; i++) Bar(10.0 + i, 11.0 + i, 9.0 + i, 10.5 + i, v: 100, t: 'd$i')];
+    final r = runFormula('X_70:=FOOBAR(CLOSE);\nX_71:=CLOSE;', {
+      'o': Float64List.fromList([for (final b in small) b.o]),
+      'h': Float64List.fromList([for (final b in small) b.h]),
+      'l': Float64List.fromList([for (final b in small) b.l]),
+      'c': Float64List.fromList([for (final b in small) b.c]),
+      'v': Float64List.fromList([for (final b in small) b.v]),
+    });
+    expect(r.unknownFunctions, contains('FOOBAR'));
+    // 第二条语句仍然执行
+    expect(r.data['X_71'], isNotNull);
+    expect(r.data['X_71']!.last, closeTo(10.5 + 29, 1e-9));
+  });
+
+  test('买卖点引用的中枢必须是信号之前就已经开始的', () {
+    final r = Chanlun.analyze(bars, formula);
+    for (final p in r.points) {
+      final box = p.box;
+      if (box == null) continue;
+      expect(box.s, lessThanOrEqualTo(p.idx), reason: '${p.label}@${p.idx} 引用了起点 ${box.s} 的中枢——那是未来才形成的中枢');
+    }
   });
 
   test('viewStart 只裁剪显示范围，不改变计算结果', () {

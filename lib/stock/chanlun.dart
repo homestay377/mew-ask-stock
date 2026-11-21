@@ -193,6 +193,7 @@ class ChanResult {
     required this.data,
     required this.errors,
     required this.bars,
+    this.unknownFunctions = const [],
   });
 
   final List<PenPoint> pens;
@@ -205,6 +206,10 @@ class ChanResult {
   /// 公式产出的全部序列（已清洗）。
   final Map<String, Float64List> data;
   final List<FormulaError> errors;
+
+  /// 公式里出现但解释器没实现的函数名。
+  /// 这些函数返回全 NaN，会让部分序列不可用——必须让调用方知道。
+  final List<String> unknownFunctions;
   final List<Bar> bars;
 }
 
@@ -397,6 +402,7 @@ class Chanlun {
         points: const [],
         data: const {},
         errors: const [],
+        unknownFunctions: const [],
         bars: const [],
       );
     }
@@ -482,7 +488,18 @@ class Chanlun {
       final a1 = segArea(prev.from, prev.to, up);
       final a2 = segArea(cur.from, cur.to, up);
       if (a1 <= _epsArea) continue;
-      final lv = boxes.length >= 2 ? '趋势' : '笔';
+
+      // ★ 级别只能用「信号发生时已经结束的中枢」来判断。
+      //
+      //   原来写的是 `boxes.length >= 2`，统计的是**全历史最终有几个中枢**，
+      //   这是未来数据：信号之后才形成的中枢也算进去了。
+      //   实测 300274：
+      //     idx=123 当天只有 1 个中枢结束  → 当时应判「笔背驰」
+      //     按全量 640 根算有 4 个中枢    → 被错判成「趋势背驰」
+      //
+      //   改成只数 `e <= cur.to` 的（在信号那根之前已走完的）中枢。
+      final boxesSoFar = boxes.where((b) => b.e <= cur.to).length;
+      final lv = boxesSoFar >= 2 ? '趋势' : '笔';
       if (a2 <= _epsArea) {
         // 分子归零 = 这一段完全没出现同向柱，价格却创新极值 → 极强背驰
         signals.add(
@@ -645,6 +662,7 @@ class Chanlun {
       points: deduped,
       data: d,
       errors: res.errors,
+      unknownFunctions: res.unknownFunctions,
       bars: b,
     );
   }

@@ -127,6 +127,15 @@ class StockAnalyzer {
       b.writeln('没有识别到三类买卖点。');
     }
 
+    if (r.unknownFunctions.isNotEmpty) {
+      b.writeln(
+        '⚠ 公式里有 ${r.unknownFunctions.length} 个函数本工具未实现，'
+        '对应序列全是空值：${r.unknownFunctions.take(6).join('、')}'
+        '${r.unknownFunctions.length > 6 ? ' 等' : ''}',
+      );
+      b.writeln('   这会直接影响依赖它们的判断，下结论前要说明这个限制。');
+    }
+
     if (r.errors.isNotEmpty) {
       b.writeln('⚠ 公式解析有 ${r.errors.length} 条错误，结果可能不完整：');
       for (final e in r.errors.take(3)) {
