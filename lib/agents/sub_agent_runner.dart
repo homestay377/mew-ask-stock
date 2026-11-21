@@ -140,6 +140,7 @@ class SubAgentRunner {
     var lastText = '';
     var failure = '';
     final byName = {for (final t in usable) t.name: t};
+    ctx.onProgress?.call('${agent.name} · 开工');
 
     for (var step = 0; step < maxSteps; step++) {
       if (ctx.cancel.isCancelled) break;
@@ -197,7 +198,7 @@ class SubAgentRunner {
       // 模型最后没给结论：把工具实际返回压成摘要，别让主智能体拿到空字符串。
       output = [for (final s in steps) '[${s.tool}] ${_clip(s.output, 400)}'].join('\n');
     }
-    return SubAgentResult(
+    final result = SubAgentResult(
       agent: agent.name,
       task: text,
       output: output,
@@ -207,6 +208,45 @@ class SubAgentRunner {
       elapsedMs: elapsed(),
       cancelled: ctx.cancel.isCancelled,
     );
+    ctx.onProgress?.call('${agent.name} · ${result.ok ? '完成' : '失败'}');
+    return result;
+  }
+
+  /// 多轮讨论：每个子智能体都能看到此前所有发言，从而互相补台或互相拆台。
+  ///
+  /// 轮数上限 5；取消时立刻停下并保留已经产生的发言（[SubAgentResult.cancelled]）。
+  Future<List<SubAgentResult>> discuss(
+    List<SubAgent> agents,
+    String topic, {
+    int rounds = 2,
+    String? extraContext,
+  }) async {
+    final out = <SubAgentResult>[];
+    final transcript = StringBuffer();
+    final maxRounds = rounds.clamp(1, 5);
+    for (var round = 1; round <= maxRounds; round++) {
+      for (final agent in agents) {
+        if (ctx.cancel.isCancelled) break;
+        final task = StringBuffer()
+          ..writeln('讨论主题：$topic')
+          ..writeln('这是第 $round 轮。');
+        if (transcript.isEmpty) {
+          task.writeln('你是第一个发言的，先给出你的判断、依据和最容易出错的地方。');
+        } else {
+          task.writeln('以下是此前所有发言。读完再表态：同意什么、反对什么、补充什么，不要重复别人的话。');
+          task.writeln();
+          task.write(transcript);
+        }
+        ctx.onProgress?.call('${agent.name} · 第 $round 轮');
+        final turn = await run(agent, task.toString(), extraContext: extraContext ?? '');
+        out.add(turn);
+        if (turn.output.trim().isNotEmpty) {
+          transcript.writeln('【${agent.name} · 第 $round 轮】${_clip(turn.output.trim(), 1200)}');
+        }
+      }
+      if (ctx.cancel.isCancelled) break;
+    }
+    return out;
   }
 
   ({ProviderConfig provider, ModelConfig model}) _modelFor(SubAgent agent) {

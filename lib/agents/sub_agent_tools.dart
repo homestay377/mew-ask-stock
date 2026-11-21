@@ -10,7 +10,7 @@ import 'tool_run_context.dart';
 List<AppTool> buildSubAgentTools({required List<SubAgent> agents}) {
   final usable = agents.where((a) => a.usable).toList();
   if (usable.isEmpty) return <AppTool>[];
-  return [_dispatchTool(usable)];
+  return [_dispatchTool(usable), _discussTool(usable)];
 }
 
 class _Assignment {
@@ -127,6 +127,78 @@ ${subAgentCatalog(agents)}''',
         'hint': '这些是子智能体交回的素材：数字照抄，结论由你自己判断并整合；不要把它们当成最终答案直接转述。',
       };
       return jsonEncode(payload);
+    },
+  );
+}
+
+AppTool _discussTool(List<SubAgent> agents) {
+  final names = [for (final a in agents) a.name];
+  return AppTool(
+    name: 'discuss_subagents',
+    displayName: '子智能体讨论',
+    description: '''组织几个子智能体围绕一个主题多轮讨论：每一轮每个人都能看到此前所有发言，可以点头、反对、补充。
+适合需要多角度权衡、互相挑错的判断，例如「这个位置能不能加仓」「这只票的结构到底成不成立」。
+一次最多 4 个参与者，默认 2 轮。讨论是串行进行的，比并行分派慢，只在真正需要交锋时用。
+可用子智能体：${subAgentCatalog(agents)}''',
+    parameters: objectSchema(
+      {
+        'topic': strProp('讨论主题。写清股票代码、周期和要回答的具体问题'),
+        'agents': {
+          'type': 'array',
+          'items': {'type': 'string'},
+          'description': '参与讨论的子智能体名称；留空表示全部可用。最多取前 4 个',
+        },
+        'rounds': intProp('轮数 1-5，默认 2'),
+      },
+      required: ['topic'],
+    ),
+    promptHint:
+        '需要多方权衡、互相挑错时用 `discuss_subagents`；讨论产出的分歧本身就是信息，'
+        '你要把「谁同意、谁反对、为什么」写进最终回答，而不是把讨论原样贴出来。',
+    execute: (args) async {
+      final ctx = currentToolRun();
+      if (ctx == null) {
+        return jsonEncode({'error': '子智能体只能在一次对话生成过程中使用'});
+      }
+      final topic = asStr(args['topic']).trim();
+      if (topic.isEmpty) {
+        return jsonEncode({'error': 'topic 为空，讨论什么？'});
+      }
+      final wanted = asList(args['agents']).map(asStr).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      final picked = wanted.isEmpty ? agents : agents.where((a) => wanted.contains(a.name)).toList();
+      final unknown = [
+        for (final n in wanted)
+          if (!agents.any((a) => a.name == n)) n,
+      ];
+      if (picked.isEmpty) {
+        return jsonEncode({'error': '没有可参与讨论的子智能体', 'unknown_agents': unknown, 'available': names});
+      }
+      final chosen = picked.take(4).toList();
+      final rounds = args['rounds'] is int ? args['rounds'] as int : 2;
+      final runner = SubAgentRunner(
+        ToolRunContext(
+          settings: ctx.settings,
+          provider: ctx.provider,
+          model: ctx.model,
+          tools: ctx.tools,
+          cancel: ctx.cancel,
+          depth: ctx.depth + 1,
+          onProgress: ctx.onProgress,
+        ),
+      );
+      final turns = await runner.discuss(chosen, topic, rounds: rounds);
+      return jsonEncode({
+        'topic': topic,
+        'rounds': rounds.clamp(1, 5),
+        'participants': [for (final a in chosen) a.name],
+        'ok': turns.isNotEmpty && turns.every((r) => r.ok),
+        'turns': [
+          for (var i = 0; i < turns.length; i++) {'round': i ~/ chosen.length + 1, ...turns[i].toJson()},
+        ],
+        if (unknown.isNotEmpty) 'unknown_agents': unknown,
+        if (ctx.cancel.isCancelled) 'cancelled': true,
+        'hint': '这是讨论记录：分歧点比结论更值钱。最终判断由你自己下，不要把发言原样转给用户。',
+      });
     },
   );
 }
