@@ -25,26 +25,37 @@ tool/sync_upstream.sh
 BRANCH=my/sync UPSTREAM_URL=https://github.com/xxx/mewhub.git tool/sync_upstream.sh
 ```
 
-脚本做四件事：fetch 上游 → 从 `upstream/main` 建分支 → 覆盖我们的独占路径与改过的上游文件 →
-打印「需要人工核对」清单和上游新增的其他文件。
+脚本做的事：fetch 上游 → 从 `upstream/main` 建分支 → **用我们整棵树覆盖**（上游独有、我们没有的新文件保留）→
+删掉上游那份重复的 Kotlin 包目录 → 打印「需要人工核对」清单。
+
+策略是刻意保守的：**宁可漏更新上游某个新功能，也不要静默把包名、MethodChannel、应用标题改回上游的**。
+上面实测那 8 个共同路径里就有 3 个是这种「改回上游就出事」的文件（`lib/app.dart` 的标题、
+`background_generation.dart` 的通道名、`build.gradle.kts` 的包名），所以不做自动合并，只列清单让人判断。
 
 ## 我们到底动了上游多少
 
-**独占（上游没有，整片取我们的）**
-`lib/stock/`、`lib/ui/stock/`、`assets/stock/`、`test/fixtures/chan/`、几个 stock 测试、
-`tool/verify_golden.dart`、`docs/chanlun-limits.md`、`docs/data-sources.md`、`docs/releases/*`。
+我们和上游 `mizaawa/mewhub` 的关系是「一层薄壳」：`lib/stock/`、`lib/ui/stock/`、`assets/stock/` 这些整片属于我们，
+上游没有同路径，永远不冲突；真正共享的只有下面这些。
 
-**改过上游的文件（需要核对）**
-`README.md`、`pubspec.yaml`、`lib/main.dart`、`lib/chat/chat_controller.dart`、
-`lib/state/settings_store.dart`、`lib/tools/stock_tools.dart`、`lib/data/assistant.dart`、
-`lib/data/stock_defaults.dart`、`lib/ui/assistant/assistant_edit_page.dart`、`lib/ui/chat/chat_page.dart`。
+**品牌与打包（上游也有，内容必须是我们的）**
+`android/app/build.gradle.kts`（包名 `io.github.homestay377.mewaskstock`）、
+`AndroidManifest.xml`、`res/values/strings.xml`、`android/app/src/main/kotlin/`（整片）、
+`ios/Runner/Info.plist`、`lib/app.dart`（标题「mew问股」）、
+`lib/state/background_generation.dart`（MethodChannel 名）、`pubspec.yaml`、`README.md`。
 
-一共 10 个。其余全在我们自己的目录里，上游随便怎么改都不冲突。
+**逻辑 hook（改过上游的业务文件）**
+`lib/main.dart`、`lib/chat/chat_controller.dart`、`lib/state/settings_store.dart`、
+`lib/tools/stock_tools.dart`、`lib/data/assistant.dart`、`lib/data/stock_defaults.dart`、
+`lib/ui/assistant/assistant_edit_page.dart`、`lib/ui/chat/chat_page.dart`。
 
-**实测：** 从快照到上游 `b1c09bf` 之间，上游改了 15 个文件
-（`android/app/build.gradle.kts`、`AndroidManifest.xml`、两个 Kotlin 文件、`values/strings.xml`、
-`ios/Runner/Info.plist`、`lib/app.dart`、`lib/state/background_generation.dart`、`pubspec.yaml` 等），
-其中落在上面 10 个名单里的**只有 `pubspec.yaml`**。也就是说一次同步通常只有一个文件要人看。
+**实测（2026-11-21，快照 → 上游 `b1c09bf`）**
+上游自我们快照以来改了 15 个路径：android 5 个、iOS 1 个、`lib/app.dart`、`lib/state/background_generation.dart`、
+`pubspec.yaml`，以及 4 个在 base 导入里就属于我们的 stock 路径（上游根本没有，不算冲突）。
+落在「共同路径」上的 8 个，**全部是品牌/打包相关**——也就是说这次同步的实际代码增量为 0，
+`tool/sync_upstream.sh` 跑完得到的树与 `main` 完全一致。
+
+真正需要读一遍的，是上游改 `lib/chat/`、`lib/tools/`、`lib/state/` 这类通用逻辑的时候。
+脚本会把这些路径列进「需要人工核对」，不会静默丢掉。
 
 ## 同步后的检查清单
 
