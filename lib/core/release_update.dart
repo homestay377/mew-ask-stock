@@ -27,7 +27,7 @@ Future<ReleaseUpdate?> checkForReleaseUpdate({http.Client? client, String? curre
           Uri.parse(latestReleaseApi),
           headers: const {
             'Accept': 'application/vnd.github+json',
-            'User-Agent': 'MewHub',
+            'User-Agent': 'mew-ask-stock',
             'X-GitHub-Api-Version': '2022-11-28',
           },
         )

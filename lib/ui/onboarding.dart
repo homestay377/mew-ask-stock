@@ -156,7 +156,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
           EntranceFx(
             index: 2,
             child: Text(
-              'MewHub',
+              'mew问股',
               style: Theme.of(context).textTheme.displaySmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -1),
             ),
           ),

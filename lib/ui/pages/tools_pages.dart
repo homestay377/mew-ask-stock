@@ -991,7 +991,7 @@ class AboutPage extends StatelessWidget {
             const SizedBox(height: 14),
             Center(
               child: Text(
-                'MewHub',
+                'mew问股',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
               ),
             ),
@@ -1029,7 +1029,7 @@ class AboutPage extends StatelessWidget {
                   title: Text(t('开源许可', 'Open-source licenses')),
                   onTap: () => showLicensePage(
                     context: context,
-                    applicationName: 'MewHub',
+                    applicationName: 'mew问股',
                     applicationVersion: snap.data?.version,
                   ),
                 ),

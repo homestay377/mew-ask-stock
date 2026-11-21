@@ -114,7 +114,7 @@ class DisplaySettings {
   );
 
   factory DisplaySettings.fromJson(Map<String, dynamic> j) => DisplaySettings(
-    userName: asStr(j['userName']).trim().isEmpty || asStr(j['userName']) == 'MewHub' ? 'Mew' : asStr(j['userName']),
+    userName: asStr(j['userName']).trim().isEmpty || asStr(j['userName']) == 'mew问股' ? 'Mew' : asStr(j['userName']),
     userAvatar: asStr(j['userAvatar']),
     conversationSortByCreation: asBool(j['conversationSortByCreation']),
     showUserAvatar: asBool(j['showUserAvatar'], true),

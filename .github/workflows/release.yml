@@ -158,11 +158,11 @@ jobs:
           flutter build appbundle --release --build-name="$VERSION" --build-number="$BUILD"
           mkdir -p dist
           out=build/app/outputs/flutter-apk
-          cp "$out/app-arm64-v8a-release.apk"   "dist/MewHub-$VERSION-android-arm64-v8a.apk"
-          cp "$out/app-armeabi-v7a-release.apk" "dist/MewHub-$VERSION-android-armeabi-v7a.apk"
-          cp "$out/app-x86_64-release.apk"      "dist/MewHub-$VERSION-android-x86_64.apk"
-          cp "$out/app-release.apk"             "dist/MewHub-$VERSION-android-universal.apk"
-          cp build/app/outputs/bundle/release/app-release.aab "dist/MewHub-$VERSION-android.aab"
+          cp "$out/app-arm64-v8a-release.apk"   "dist/mew-wengu-$VERSION-android-arm64-v8a.apk"
+          cp "$out/app-armeabi-v7a-release.apk" "dist/mew-wengu-$VERSION-android-armeabi-v7a.apk"
+          cp "$out/app-x86_64-release.apk"      "dist/mew-wengu-$VERSION-android-x86_64.apk"
+          cp "$out/app-release.apk"             "dist/mew-wengu-$VERSION-android-universal.apk"
+          cp build/app/outputs/bundle/release/app-release.aab "dist/mew-wengu-$VERSION-android.aab"
           (cd dist && sha256sum ./*.apk ./*.aab > SHA256SUMS-android.txt)
           ls -la dist
 
@@ -198,7 +198,7 @@ jobs:
           flutter build ios --release --no-codesign --build-name="$VERSION" --build-number="$BUILD"
           mkdir -p dist Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
-          zip -qry "dist/MewHub-$VERSION-ios-unsigned.ipa" Payload
+          zip -qry "dist/mew-wengu-$VERSION-ios-unsigned.ipa" Payload
           (cd dist && shasum -a 256 ./*.ipa > SHA256SUMS-ios.txt)
           ls -la dist
 
@@ -244,12 +244,12 @@ jobs:
             echo
             echo "| Platform | File |"
             echo "|---|---|"
-            echo "| Android, most phones (64-bit) | \`MewHub-$VERSION-android-arm64-v8a.apk\` |"
-            echo "| Android, older 32-bit phones | \`MewHub-$VERSION-android-armeabi-v7a.apk\` |"
-            echo "| Android, x86_64 devices | \`MewHub-$VERSION-android-x86_64.apk\` |"
-            echo "| Android, any device | \`MewHub-$VERSION-android-universal.apk\` |"
-            echo "| Android, Google Play upload | \`MewHub-$VERSION-android.aab\` |"
-            echo "| iOS, unsigned (sign before installing) | \`MewHub-$VERSION-ios-unsigned.ipa\` |"
+            echo "| Android, most phones (64-bit) | \`mew-wengu-$VERSION-android-arm64-v8a.apk\` |"
+            echo "| Android, older 32-bit phones | \`mew-wengu-$VERSION-android-armeabi-v7a.apk\` |"
+            echo "| Android, x86_64 devices | \`mew-wengu-$VERSION-android-x86_64.apk\` |"
+            echo "| Android, any device | \`mew-wengu-$VERSION-android-universal.apk\` |"
+            echo "| Android, Google Play upload | \`mew-wengu-$VERSION-android.aab\` |"
+            echo "| iOS, unsigned (sign before installing) | \`mew-wengu-$VERSION-ios-unsigned.ipa\` |"
             echo
             echo "SHA-256 checksums: \`SHA256SUMS-android.txt\` and \`SHA256SUMS-ios.txt\`."
           } > notes.md
@@ -262,7 +262,7 @@ jobs:
           PRERELEASE: ${{ needs.meta.outputs.prerelease }}
         run: |
           export LC_ALL=C
-          prefix="./MewHub-$VERSION"
+          prefix="./mew-wengu-$VERSION"
           android=("$prefix"-android-{arm64-v8a,armeabi-v7a,universal,x86_64}.apk "$prefix-android.aab")
           ios="$prefix-ios-unsigned.ipa"
           assets=("${android[@]}" "$ios" ./SHA256SUMS-{android,ios}.txt)
@@ -280,7 +280,7 @@ jobs:
             }' --jq '.data.repository.release | if . == null then "new" elif .isDraft then "draft" else "published" end')
           case "$state" in
             new) gh release create "$TAG" --verify-tag --draft --prerelease="$PRERELEASE" \
-                   --title "MewHub $TAG" --notes-file ../notes.md --generate-notes ;;
+                   --title "mew问股 $TAG" --notes-file ../notes.md --generate-notes ;;
             draft) echo "Resuming the draft for $TAG" ;;
             *) echo "::error::Refusing to change a non-draft release: $TAG ($state)"; exit 1 ;;
           esac

@@ -234,7 +234,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (s.display.notifyOnFinish && !isAppInForeground) {
       unawaited(
         Notifier.showDone(
-          c.title.isEmpty ? 'MewHub' : c.title,
+          c.title.isEmpty ? 'mew问股' : c.title,
           last.text,
           conversationId: c.id,
           accent: accentColorAt(s.accentIndex),
