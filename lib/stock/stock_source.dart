@@ -7,6 +7,7 @@
 ///  - 东财 `push2` 会超时，实时改用 `push2delay`；K 线用 `push2his`
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -49,6 +50,41 @@ class KlineSeries {
   final String source;
 
   bool get isFallback => source != 'tencent';
+
+  /// 存盘用：bars 压成数组，比对象省一半以上体积。
+  Map<String, dynamic> toDisk() => {
+    'symbol': symbol,
+    'name': name,
+    'period': period,
+    'source': source,
+    'bars': [
+      for (final b in bars) [b.t, b.o, b.h, b.l, b.c, b.v],
+    ],
+  };
+
+  static KlineSeries? fromDisk(Map<String, dynamic> j) {
+    final rows = j['bars'];
+    if (rows is! List || rows.isEmpty) return null;
+    final bars = <Bar>[];
+    for (final r in rows) {
+      if (r is! List || r.length < 6) continue;
+      double? d(Object? v) => v is num ? v.toDouble() : double.tryParse('$v');
+      final o = d(r[1]);
+      final h = d(r[2]);
+      final l = d(r[3]);
+      final c = d(r[4]);
+      if (o == null || h == null || l == null || c == null) continue;
+      bars.add(Bar(o, h, l, c, v: d(r[5]) ?? 0, t: '${r[0]}'));
+    }
+    if (bars.isEmpty) return null;
+    return KlineSeries(
+      symbol: '${j['symbol'] ?? ''}',
+      name: '${j['name'] ?? ''}',
+      period: '${j['period'] ?? 'day'}',
+      bars: bars,
+      source: '${j['source'] ?? 'tencent'}',
+    );
+  }
 
   int get length => bars.length;
   Bar get last => bars.last;
@@ -223,18 +259,68 @@ class StockSource {
     final code = normalize(symbol);
     final p = normalizePeriod(period);
 
-    Object? tencentError;
-    try {
-      return await _klineTencent(code, p, count);
-    } catch (e) {
-      tencentError = e;
+    // 三级降级：腾讯（前复权，最快最稳）→ 新浪（不复权）→ 东财（前复权，连接不稳）
+    final errors = <String>[];
+    for (final fetcher in <Future<KlineSeries> Function()>[
+      () => _klineTencent(code, p, count),
+      () => _klineSina(code, p, count),
+      () => _klineEastmoney(code, p, count),
+    ]) {
+      try {
+        return await fetcher();
+      } catch (e) {
+        errors.add('$e');
+      }
     }
+    throw StockDataError('行情源都失败了：${errors.join('；')}');
+  }
 
-    try {
-      return await _klineSina(code, p, count);
-    } catch (e) {
-      throw StockDataError('行情源都失败了。腾讯：$tencentError；新浪：$e');
+  // ------------------------------------------------------------ 东财（第三源）
+
+  /// 东财 klt 参数。日/周/月是 101/102/103，分钟直接用数字。
+  static const _emKlt = <String, int>{'day': 101, 'week': 102, 'month': 103, 'm60': 60, 'm30': 30, 'm15': 15, 'm5': 5};
+
+  /// 东财 K 线（**前复权**，fqt=1）。
+  ///
+  /// 字段顺序与腾讯一致：`日期,开,收,高,低,量`，量单位也是「手」。
+  /// 连接不太稳定（实测有约 1/3 概率连不上），所以排在最后。
+  Future<KlineSeries> _klineEastmoney(String code, String p, int count) async {
+    final klt = _emKlt[p];
+    if (klt == null) throw StockDataError('东财源不支持周期 $p');
+
+    // secid：沪市前缀 1，深市/北交所前缀 0
+    final market = code.startsWith('sh') ? '1' : '0';
+    final num = code.substring(2);
+    final url =
+        'https://push2his.eastmoney.com/api/qt/stock/kline/get'
+        '?secid=$market.$num&fields1=f1,f2&fields2=f51,f52,f53,f54,f55,f56'
+        '&klt=$klt&fqt=1&end=20500101&lmt=$count';
+
+    final body = await _text(url, referer: 'https://quote.eastmoney.com/');
+    final root = jsonDecode(body);
+    final data = root is Map ? root['data'] : null;
+    if (data is! Map) throw StockDataError('东财没有返回数据');
+
+    final name = data['name']?.toString() ?? code;
+    final rows = data['klines'];
+    if (rows is! List || rows.isEmpty) throw StockDataError('东财没有 K 线数据');
+
+    final bars = <Bar>[];
+    for (final r in rows) {
+      if (r is! String) continue;
+      final f = r.split(',');
+      if (f.length < 6) continue;
+      final o = _d(f[1]);
+      final c = _d(f[2]);
+      final h = _d(f[3]);
+      final l = _d(f[4]);
+      final v = _d(f[5]);
+      if (o == null || c == null || h == null || l == null) continue;
+      bars.add(Bar(o, h, l, c, v: v ?? 0, t: f[0]));
     }
+    if (bars.isEmpty) throw StockDataError('东财 K 线解析后为空');
+
+    return KlineSeries(symbol: code, name: name, period: p, bars: bars, source: 'eastmoney');
   }
 
   // ------------------------------------------------------------ 腾讯（主源）
@@ -514,27 +600,140 @@ class StockSource {
   // ------------------------------------------------------------ 缓存
 
   static const _freshMs = 60000;
-  static const _staleMs = 600000;
   static const _minuteFreshMs = 15000;
   static const _maxCache = 12;
 
   final Map<String, _CacheEntry> _cache = {};
 
-  /// 带两级缓存取 K 线：1 分钟内直接命中；10 分钟内先返回旧值再后台刷新。
+  /// 三级缓存取 K 线：内存 → 磁盘 → 网络。
   ///
-  /// [onStale] 用于把刷新后的结果推给界面；为 null 时只做同步刷新。
-  Future<KlineSeries> klineCached(String symbol, {String period = 'day', int count = chanBarCount}) {
-    final key = '${normalize(symbol)}|$period|$count';
+  /// 行为：
+  ///  - 内存 1 分钟内新鲜 → 直接返回，不发请求
+  ///  - 内存有旧值 / 磁盘有缓存 → **立刻返回旧数据**，同时后台刷新，
+  ///    刷新完通过 [onRefresh] 推给界面。冷启动时用户先看到上次的图，
+  ///    不用对着空屏等网络。
+  ///  - 都没有 → 走网络（含三级降级），结果写内存和磁盘
+  Future<KlineSeries> klineCached(
+    String symbol, {
+    String period = 'day',
+    int count = chanBarCount,
+    void Function(KlineSeries fresh)? onRefresh,
+  }) async {
+    final code = normalize(symbol);
+    final key = '$code|$period|$count';
+
+    // 1) 内存命中且新鲜
     final hit = _cache[key];
     if (hit != null) {
       final age = DateTime.now().difference(hit.at).inMilliseconds;
-      if (age < _freshMs) return Future.value(hit.series!);
+      if (age < _freshMs) return hit.series!;
+      // 2) 内存有旧值：先给旧的，后台刷新
+      _refreshInBackground(key, code, period, count, onRefresh);
+      return hit.series!;
     }
-    final fresh = kline(symbol, period: period, count: count).then((s) {
-      _put(key, s);
-      return s;
-    });
+
+    // 3) 磁盘缓存：先给旧的，后台刷新
+    final disk = await _readDisk(code, period, count);
+    if (disk != null) {
+      _cache[key] = _CacheEntry(disk, DateTime.now());
+      _refreshInBackground(key, code, period, count, onRefresh);
+      return disk;
+    }
+
+    // 4) 走网络
+    final fresh = await kline(code, period: period, count: count);
+    _put(key, fresh);
+    unawaited(_writeDisk(code, period, count, fresh));
     return fresh;
+  }
+
+  /// 后台刷新，不阻塞调用方。失败静默（旧数据仍然可用）。
+  void _refreshInBackground(String key, String code, String period, int count, void Function(KlineSeries)? onRefresh) {
+    unawaited(
+      kline(code, period: period, count: count)
+          .then((s) {
+            _put(key, s);
+            unawaited(_writeDisk(code, period, count, s));
+            onRefresh?.call(s);
+          })
+          .catchError((Object _) {
+            // 后台刷新失败就算了，用户手上还有旧数据
+          }),
+    );
+  }
+
+  // ------------------------------------------------------------ 磁盘缓存
+
+  static const _diskMaxFiles = 40;
+
+  /// 磁盘缓存的根目录。
+  ///
+  /// 默认 null = 不启用磁盘缓存。App 启动时设为 `AppPaths.support`，
+  /// 这样这个文件不依赖 Flutter，纯 Dart 环境（测试、脚本）也能直接跑。
+  static Directory? diskRoot;
+
+  Directory? get _cacheDir {
+    final root = diskRoot;
+    return root == null ? null : Directory('${root.path}/stock_cache');
+  }
+
+  File? _diskFile(String code, String period, int count) {
+    final dir = _cacheDir;
+    return dir == null ? null : File('${dir.path}/${code}_${period}_$count.json');
+  }
+
+  Future<KlineSeries?> _readDisk(String code, String period, int count) async {
+    try {
+      final f = _diskFile(code, period, count);
+      if (f == null || !await f.exists()) return null;
+      final raw = await f.readAsString();
+      if (raw.trim().isEmpty) return null;
+      final j = jsonDecode(raw);
+      if (j is! Map) return null;
+      return KlineSeries.fromDisk(j.cast<String, dynamic>());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _writeDisk(String code, String period, int count, KlineSeries s) async {
+    try {
+      final dir = _cacheDir;
+      final f = _diskFile(code, period, count);
+      if (dir == null || f == null) return;
+      if (!await dir.exists()) await dir.create(recursive: true);
+      final tmp = File('${f.path}.tmp');
+      await tmp.writeAsString(jsonEncode(s.toDisk()), flush: true);
+      await tmp.rename(f.path);
+      unawaited(_pruneDisk(dir));
+    } catch (_) {
+      // 存不下来只影响下次冷启动，本次仍然可用
+    }
+  }
+
+  /// 控制缓存文件数量，删最旧的。
+  Future<void> _pruneDisk(Directory dir) async {
+    try {
+      final files = <(File, DateTime)>[];
+      await for (final e in dir.list()) {
+        if (e is! File || !e.path.endsWith('.json')) continue;
+        final st = await e.stat();
+        files.add((e, st.modified));
+      }
+      if (files.length <= _diskMaxFiles) return;
+      files.sort((a, b) => a.$2.compareTo(b.$2));
+      for (var i = 0; i < files.length - _diskMaxFiles; i++) {
+        await files[i].$1.delete();
+      }
+    } catch (_) {}
+  }
+
+  /// 清空磁盘缓存（设置页「清理缓存」用）。
+  Future<void> clearDiskCache() async {
+    try {
+      final dir = _cacheDir;
+      if (dir != null && await dir.exists()) await dir.delete(recursive: true);
+    } catch (_) {}
   }
 
   void _put(String key, KlineSeries s) {
@@ -584,14 +783,6 @@ class StockSource {
   }
 
   /// 缓存是否已过期到需要后台刷新（10 分钟内不算过期）。
-  bool isStale(String symbol, {String period = 'day', int count = chanBarCount}) {
-    final hit = _cache['${normalize(symbol)}|$period|$count'];
-    if (hit == null) return true;
-    return DateTime.now().difference(hit.at).inMilliseconds > _staleMs;
-  }
-
-  void clearCache() => _cache.clear();
-
   int get minuteFreshMs => _minuteFreshMs;
 
   // ------------------------------------------------------------ 多级别

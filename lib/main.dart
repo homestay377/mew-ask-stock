@@ -11,6 +11,7 @@ import 'data/database.dart';
 import 'state/app_state.dart';
 import 'state/settings_store.dart';
 import 'state/tts.dart';
+import 'stock/stock_source.dart';
 import 'ui/stock/stock_chart_panel.dart';
 import 'ui/theme.dart';
 
@@ -30,6 +31,8 @@ Future<void> main() async {
   await stockPanel.restore();
 
   await AppPaths.init();
+  // 启用 K 线磁盘缓存：冷启动先显示上次的图，再后台刷新。
+  StockSource.diskRoot = AppPaths.support;
   await Attachments.recoverLostChatPhotos();
   final store = await SettingsStore.load();
   final db = await AppDatabase.open();

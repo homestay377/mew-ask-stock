@@ -329,7 +329,12 @@ class _StockChartPanelState extends State<StockChartPanel> {
         return;
       }
 
-      final s = await _src.klineCached(widget.state.symbol, period: widget.state.period);
+      final s = await _src.klineCached(
+        widget.state.symbol,
+        period: widget.state.period,
+        // 后台刷新拿到新数据时静默替换，不重算视口（用户可能正在缩放）
+        onRefresh: (fresh) => _applyFreshData(fresh, key),
+      );
       if (!mounted || _lastKey != key) return;
       ChanResult? ch;
       if (widget.state.showChan) {
@@ -425,6 +430,22 @@ class _StockChartPanelState extends State<StockChartPanel> {
         ],
       ),
     );
+  }
+
+  /// 后台刷新的新数据到了：只换数据，不动视口。
+  ///
+  /// 用户可能正在缩放或看某一段历史，这时候重置视口会把他弹回最新。
+  Future<void> _applyFreshData(KlineSeries fresh, String key) async {
+    if (!mounted || _lastKey != key) return;
+    ChanResult? ch;
+    if (widget.state.showChan) {
+      ch = Chanlun.analyze(fresh.bars, await _formula());
+    }
+    if (!mounted || _lastKey != key) return;
+    setState(() {
+      _series = fresh;
+      _chan = ch;
+    });
   }
 
   /// 用了备源（新浪）时的提示：不复权，除权日会跳空，缠论可能多出假信号。
