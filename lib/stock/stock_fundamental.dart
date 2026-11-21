@@ -153,7 +153,7 @@ class Fundamental {
 
 /// 把大数字读成「亿 / 万」，给模型看更省 token，也不容易读错量级。
 String fmtMoney(double? v) {
-  if (v == null) return '—';
+  if (v == null || !v.isFinite) return '—';
   final abs = v.abs();
   if (abs >= 1e8) return '${(v / 1e8).toStringAsFixed(2)}亿';
   if (abs >= 1e4) return '${(v / 1e4).toStringAsFixed(2)}万';
@@ -162,13 +162,13 @@ String fmtMoney(double? v) {
 
 /// 百分比，保留两位。
 String fmtPct(double? v) {
-  if (v == null) return '—';
+  if (v == null || !v.isFinite) return '—';
   return '${v >= 0 ? '+' : ''}${v.toStringAsFixed(2)}%';
 }
 
 /// 普通数字，保留两位。
 String fmtNum(double? v) {
-  if (v == null) return '—';
+  if (v == null || !v.isFinite) return '—';
   return v.toStringAsFixed(2);
 }
 

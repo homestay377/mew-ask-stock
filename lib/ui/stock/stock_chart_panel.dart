@@ -301,12 +301,15 @@ class _StockChartPanelState extends State<StockChartPanel> {
       _error = null;
       _focus = -1;
       _cross.clear();
+      // ★ 必须清掉上一只的行情：新股取数失败时如果留着旧值，
+      //   面板会显示「A 股的价格 + B 股的 K 线」，比空白更误导。
+      _quote = null;
     });
 
-    // 行情卡与主数据并行取，互不阻塞。
+    // 行情卡与主数据并行取，互不阻塞。走缓存版，避免每切一次都打一次请求。
     unawaited(
       _src
-          .quote(widget.state.symbol)
+          .quoteCached(widget.state.symbol)
           .then((q) {
             if (!mounted || _lastKey != key) return;
             setState(() => _quote = q);
@@ -338,8 +341,13 @@ class _StockChartPanelState extends State<StockChartPanel> {
       if (!mounted || _lastKey != key) return;
       ChanResult? ch;
       if (widget.state.showChan) {
-        ch = Chanlun.analyze(s.bars, await _formula());
+        final formula = await _formula();
+        // ★ 计算可能耗时（几百毫秒），这期间用户可能已经切股。
+        //   不校验就会用旧数据的根数重置视口，把新股票的视口弄乱。
+        if (!mounted || _lastKey != key) return;
+        ch = Chanlun.analyze(s.bars, formula);
       }
+      if (!mounted || _lastKey != key) return;
       _viewport.reset(s.bars.length);
       final shapes = await ShapeStore.instance.load(widget.state.symbol, widget.state.period);
       if (!mounted || _lastKey != key) return;

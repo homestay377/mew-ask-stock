@@ -5,6 +5,7 @@
 library;
 
 import 'chanlun.dart';
+import 'numbers.dart';
 import 'stock_source.dart';
 
 /// 单个标的的缠论分析结果（含渲染好的中文摘要）。
@@ -32,28 +33,14 @@ class StockAnalysis {
     },
     'pens': chan.pens.length,
     'boxes': [
-      for (final b in chan.boxes)
-        {
-          'tag': b.tag,
-          'start': b.s,
-          'end': b.e,
-          'zg': double.parse(b.zg.toStringAsFixed(2)),
-          'zd': double.parse(b.zd.toStringAsFixed(2)),
-        },
+      for (final b in chan.boxes) {'tag': b.tag, 'start': b.s, 'end': b.e, 'zg': r2(b.zg), 'zd': r2(b.zd)},
     ],
     'signals': [
       for (final s in chan.signals)
-        {
-          'idx': s.idx,
-          'type': s.type,
-          'label': s.label,
-          'price': double.parse(s.price.toStringAsFixed(2)),
-          'strength': s.strength,
-        },
+        {'idx': s.idx, 'type': s.type, 'label': s.label, 'price': r2(s.price), 'strength': s.strength},
     ],
     'points': [
-      for (final p in chan.points)
-        {'idx': p.idx, 'label': p.label, 'price': double.parse(p.price.toStringAsFixed(2)), 'reason': p.reason},
+      for (final p in chan.points) {'idx': p.idx, 'label': p.label, 'price': r2(p.price), 'reason': p.reason},
     ],
     'boxPosition': chan.stats.boxPosition,
     'formulaErrors': chan.errors.length,

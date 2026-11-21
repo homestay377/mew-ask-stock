@@ -27,12 +27,14 @@ Future<void> main() async {
   setStockFormulaLoader(() => rootBundle.loadString('assets/stock/chan_formula.txt'));
   // 让 AI 的工具能驱动 K 线面板（stock_panel_show）。
   installStockPanelBridge();
-  // 恢复上次看的标的（首次启动是上证指数）。
-  await stockPanel.restore();
 
   await AppPaths.init();
   // 启用 K 线磁盘缓存：冷启动先显示上次的图，再后台刷新。
   StockSource.diskRoot = AppPaths.support;
+  // ★ 恢复上次看的标的必须放在 AppPaths.init() 之后：
+  //   AppPaths.support 是 late 变量，提前访问会抛 LateInitializationError，
+  //   被 restore() 里的 try-catch 吞掉，表现就是「怎么都记不住上次的股票」。
+  await stockPanel.restore();
   await Attachments.recoverLostChatPhotos();
   final store = await SettingsStore.load();
   final db = await AppDatabase.open();

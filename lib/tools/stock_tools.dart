@@ -12,6 +12,7 @@ import '../stock/chart_shapes.dart';
 import '../stock/stock_bridge.dart';
 import '../stock/shape_store.dart';
 import '../stock/stock_analyzer.dart';
+import '../stock/numbers.dart';
 import '../stock/stock_fundamental.dart';
 import '../stock/stock_source.dart';
 import 'tool.dart';
@@ -25,6 +26,14 @@ Future<String> _formula() async {
   final text = await rootBundle.loadString('assets/stock/chan_formula.txt');
   _formulaCache = text;
   return text;
+}
+
+/// 宽容的数字解析：接受数字、数字字符串，拒绝 NaN / 无穷。
+double? _num(Object? v) {
+  if (v == null) return null;
+  final d = v is num ? v.toDouble() : double.tryParse(v.toString());
+  if (d == null || !d.isFinite) return null;
+  return d;
 }
 
 /// 解析工具要分析哪只股票。
@@ -66,8 +75,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
       parameters: objectSchema({
         'symbol': strProp('股票代码，如 300274 / sh510300 / sh000001。不传则分析面板当前标的'),
         'period': strProp(
-          '周期：day/week/month/m60/m30/m15/m5，默认 day',
-          enumValues: ['day', 'week', 'month', 'm60', 'm30', 'm15', 'm5'],
+          '周期：day/week/month/m60/m30/m15/m5/minute（分时），默认 day',
+          enumValues: ['day', 'week', 'month', 'm60', 'm30', 'm15', 'm5', 'minute'],
         ),
         'count': intProp('取多少根，默认 60，最多 640'),
       }),
@@ -77,6 +86,43 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           final symbol = resolveSymbol(args['symbol']);
           if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
           final period = '${args['period'] ?? 'day'}';
+
+          // 分时：结构完全不同（按时间等分，没有 OHLC），单独处理。
+          // 241 个点全返回会吃掉大量 token，所以只给摘要 + 每 15 分钟采样。
+          if (period == 'minute') {
+            final m = await source.minuteCached(symbol);
+            final prices = [for (final p in m.points) p.price];
+            final hi = prices.reduce((a, b) => a > b ? a : b);
+            final lo = prices.reduce((a, b) => a < b ? a : b);
+            final above = m.points.where((p) => p.price >= m.prevClose).length;
+            final sampled = <List<Object>>[];
+            for (var i = 0; i < m.points.length; i += 15) {
+              sampled.add([m.points[i].label, r2(m.points[i].price) ?? 0]);
+            }
+            // 收盘那一点单独补上，采样可能刚好错过
+            final lastLabel = m.points.last.label;
+            if (sampled.isEmpty || sampled.last[0] != lastLabel) {
+              sampled.add([lastLabel, r2(m.lastPrice) ?? 0]);
+            }
+            return jsonEncode({
+              'symbol': m.symbol,
+              'name': m.name,
+              'period': 'minute',
+              'date': m.date,
+              'prev_close': r2(m.prevClose),
+              'open': r2(prices.first),
+              'high': r2(hi),
+              'low': r2(lo),
+              'last': r2(m.lastPrice),
+              'change_pct': r2(m.changePct),
+              'points': m.points.length,
+              // 高于昨收的时间占比：粗看多空强弱，比逐点读省很多 token
+              'above_prev_ratio': r2(m.points.isEmpty ? null : above / m.points.length),
+              'sampled': sampled,
+              'note': '分时没有 OHLC，缠论不适用于分时；量能请用日线或分钟线看',
+            });
+          }
+
           final rawCount = args['count'];
           final count = rawCount is int ? rawCount.clamp(1, chanBarCount) : 60;
 
@@ -85,7 +131,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
 
           final closes = s.bars.map((b) => b.c).toList();
           double maOf(int n) {
-            if (closes.length < n) return double.nan;
+            // 数据不足返回 null：NaN 会让 jsonEncode 抛异常，整个工具挂掉
+            if (closes.length < n) return null;
             final seg = closes.sublist(closes.length - n);
             return seg.reduce((a, b) => a + b) / n;
           }
@@ -156,8 +203,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
             'name': q.name,
             'price': q.price,
             'prev_close': q.prevClose,
-            'change': double.parse(q.change.toStringAsFixed(2)),
-            'change_pct': double.parse(q.changePct.toStringAsFixed(2)),
+            'change': r2(q.change),
+            'change_pct': r2(q.changePct),
             'open': q.open,
             'high': q.high,
             'low': q.low,
@@ -227,15 +274,10 @@ List<AppTool> buildStockTools({bool enabled = true}) {
                           'box_position': r.chan.stats.boxPosition,
                           'last_signals': [
                             for (final s in r.chan.signals.take(2))
-                              {
-                                'label': s.label,
-                                'price': double.parse(s.price.toStringAsFixed(2)),
-                                'strength': s.strength,
-                              },
+                              {'label': s.label, 'price': r2(s.price), 'strength': s.strength},
                           ],
                           'last_points': [
-                            for (final pt in r.chan.points.take(2))
-                              {'label': pt.label, 'price': double.parse(pt.price.toStringAsFixed(2))},
+                            for (final pt in r.chan.points.take(2)) {'label': pt.label, 'price': r2(pt.price)},
                           ],
                         },
                       )
@@ -409,14 +451,12 @@ List<AppTool> buildStockTools({bool enabled = true}) {
                   'symbol': r.series.symbol,
                   'name': r.series.name,
                   if (q != null) 'price': q.price,
-                  if (q != null) 'change_pct': double.parse(q.changePct.toStringAsFixed(2)),
+                  if (q != null) 'change_pct': r2(q.changePct),
                   'close': r.series.last.c,
                   'boxes': r.chan.boxes.length,
                   'box_position': r.chan.stats.boxPosition,
                   'last_point': r.chan.points.isEmpty ? null : r.chan.points.last.label,
-                  'last_point_price': r.chan.points.isEmpty
-                      ? null
-                      : double.parse(r.chan.points.last.price.toStringAsFixed(2)),
+                  'last_point_price': r.chan.points.isEmpty ? null : r2(r.chan.points.last.price),
                   'last_signal': r.chan.signals.isEmpty ? null : r.chan.signals.last.label,
                 };
               }),
@@ -499,9 +539,11 @@ List<AppTool> buildStockTools({bool enabled = true}) {
               rejected.add('未知类型 $kindName');
               continue;
             }
-            final price = (item['price'] as num?)?.toDouble();
+            // 模型给的参数不一定都是数字：可能是 "72.5" 这样的字符串，
+            // 甚至 "NaN"。强转会抛 TypeError 把整批图元搞挂，所以统一走宽容解析。
+            final price = _num(item['price']);
             if (price == null) {
-              rejected.add('$kindName 缺少 price');
+              rejected.add('$kindName 缺少有效的 price');
               continue;
             }
             final idx = resolveIndex(item['index'], total - 1);
@@ -510,7 +552,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
                 kind == ShapeKind.rect ||
                 kind == ShapeKind.arrow ||
                 kind == ShapeKind.ray;
-            if (needTwo && (item['index2'] == null || item['price2'] == null)) {
+            final price2 = _num(item['price2']);
+            if (needTwo && (item['index2'] == null || price2 == null)) {
               rejected.add('$kindName 需要 index2 和 price2');
               continue;
             }
@@ -520,7 +563,7 @@ List<AppTool> buildStockTools({bool enabled = true}) {
                 i1: idx,
                 p1: price,
                 i2: needTwo ? resolveIndex(item['index2'], idx) : null,
-                p2: needTwo ? (item['price2'] as num).toDouble() : null,
+                p2: price2,
                 text: item['text']?.toString(),
                 color: shapeColorFromName('${item['color'] ?? 'accent'}'),
               ),

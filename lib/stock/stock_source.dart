@@ -477,10 +477,16 @@ class StockSource {
     return null;
   }
 
+  /// 宽容的数字解析。
+  ///
+  /// ★ 必须挡住 NaN / Infinity：`double.tryParse('NaN')` 是会成功的，
+  ///   接口偶尔真会吐 "NaN" 这种值，一旦流进计算就会污染整列指标
+  ///   （NaN 会顺着加减乘除传染，最后整个面板算不出东西）。
   static double? _d(Object? v) {
     if (v == null) return null;
-    if (v is num) return v.toDouble();
-    return double.tryParse(v.toString());
+    final d = v is num ? v.toDouble() : double.tryParse(v.toString());
+    if (d == null) return null;
+    return d.isFinite ? d : null;
   }
 
   // ------------------------------------------------------------ 实时快照
