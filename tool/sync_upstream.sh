@@ -108,16 +108,23 @@ echo
 echo "== 上游新增/修改的其他文件（已经在树里了，看一眼有没有新能力要接）=="
 UPSTREAM_CHANGED_FILE=$(mktemp)
 printf '%s\n' "$UPSTREAM_CHANGED" > "$UPSTREAM_CHANGED_FILE"
+shown=0
 while IFS= read -r p; do
   skip=0
   for own in "${OWNED[@]}"; do
-    case "$p" in
-      "$own"|"$own"/*) skip=1; break ;;
-    esac
+    case "$p" in "$own"|"$own"/*) skip=1; break ;; esac
   done
-  [[ "$skip" -eq 0 ]] && echo "   $p"
-done < "$UPSTREAM_CHANGED_FILE" | head -40
+  for sh in "${SHARED[@]}"; do
+    [[ "$p" == "$sh" ]] && skip=1
+  done
+  if [[ "$skip" -eq 0 ]]; then
+    echo "   $p"
+    shown=$((shown + 1))
+    [[ "$shown" -ge 40 ]] && break
+  fi
+done < "$UPSTREAM_CHANGED_FILE"
 rm -f "$UPSTREAM_CHANGED_FILE"
+[[ "$shown" -eq 0 ]] && echo "   （无）"
 
 if [[ -n "$(git status --porcelain)" ]]; then
   git add -A
