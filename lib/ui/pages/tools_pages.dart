@@ -1007,9 +1007,12 @@ class AboutPage extends StatelessWidget {
                 ListTile(
                   leading: const IconBadge(Icons.code_rounded),
                   title: const Text('GitHub'),
-                  subtitle: const Text('github.com/mizaawa/mewhub'),
-                  onTap: () =>
-                      launchUrl(Uri.parse('https://github.com/mizaawa/mewhub'), mode: LaunchMode.externalApplication),
+                  // 用户要的是「我这个包从哪来」，所以指本仓库；底座 MewHub 的来源在 README 里写
+                  subtitle: const Text('github.com/homestay377/mew-ask-stock'),
+                  onTap: () => launchUrl(
+                    Uri.parse('https://github.com/homestay377/mew-ask-stock'),
+                    mode: LaunchMode.externalApplication,
+                  ),
                 ),
                 ListTile(
                   leading: const IconBadge(Icons.shield_outlined),

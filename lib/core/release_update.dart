@@ -3,7 +3,10 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 
-const latestReleaseApi = 'https://api.github.com/repos/mizaawa/mewhub/releases/latest';
+/// 更新检查指向**本仓库**的 release，而不是上游 MewHub：
+/// 我们的包 applicationId 是 io.github.homestay377.mewaskstock，装不了上游的 APK，
+/// 指过去只会提示一个装不上的版本。
+const latestReleaseApi = 'https://api.github.com/repos/homestay377/mew-ask-stock/releases/latest';
 
 class ReleaseUpdate {
   const ReleaseUpdate({required this.version, required this.notes, required this.url});
