@@ -572,10 +572,7 @@ class ChatController extends ChangeNotifier {
       // 分派工具要等子智能体跑完，3 分钟明显不够；其余工具维持原来的上限。
       final limit = tool.name == 'dispatch_subagents' ? const Duration(minutes: 10) : const Duration(minutes: 3);
       try {
-        final out = await runWithToolContext(
-          runCtx,
-          () => tool.execute(current.inputJson),
-        ).timeout(limit);
+        final out = await runWithToolContext(runCtx, () => tool.execute(current.inputJson)).timeout(limit);
         final decoded = call.name == 'plot_cartesian' || call.name == 'plot_spatial' ? tryJsonDecode(out) : null;
         acc.parts[idx] = current.copyWith(output: out, isError: decoded is Map && decoded.containsKey('error'));
       } catch (e) {
