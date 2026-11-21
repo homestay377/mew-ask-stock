@@ -1,100 +1,203 @@
 <div align="center">
-  <img src="assets/images/icon.png" width="112" alt="MewHub icon" />
-  <h1>MewHub</h1>
-  <p>A warm, milk-white AI chat client for Android and iOS, built with Flutter.</p>
-  <p>
-    <a href="https://github.com/mizaawa/mewhub/actions/workflows/ci.yml"><img src="https://github.com/mizaawa/mewhub/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-    <a href="https://github.com/mizaawa/mewhub/releases/latest"><img src="https://img.shields.io/github/v/release/mizaawa/mewhub?include_prereleases" alt="Release" /></a>
-  </p>
-  <p><a href="#中文">中文</a> · <a href="#english">English</a></p>
+
+<h1>mew 问股</h1>
+
+<p>基于 <a href="https://github.com/mizaawa/mewhub">MewHub</a> 的股票分析客户端，内置缠论引擎。</p>
+<p>Flutter · Android / iOS · 本地计算 · 零云端</p>
+
 </div>
 
 ---
 
-## 中文
+## 这是什么
 
-MewHub 是一个多供应商 AI 聊天客户端，功能参考 [RikkaHub](https://github.com/rikkahub/rikkahub)，用 Flutter 重写以同时支持 Android 与 iOS。界面是奶白色系，动画贯穿全程。
+一份 MewHub 的分支，**在原版基础上增加了完整的 A 股技术分析与基本面能力**。
 
-### 功能
+MewHub 原有的功能（多供应商 AI 对话、工具调用、MCP、世界书、记忆、多模态）**一行未改**，全部保留。改动只发生在新增目录里：
 
-- **四种协议原生实现**：OpenAI Chat Completions、OpenAI Responses、Anthropic Messages、Google Gemini，全部流式输出
-- **任意第三方 API**：自定义 Base URL / 路径 / 请求头 / 请求体，多 Key 轮询，余额查询；内置 DeepSeek、OpenRouter、硅基流动、月之暗面、百炼、火山、智谱、xAI、Ollama 等模板
-- **导入配置**：扫码 / 剪贴板导入，兼容 RikkaHub 的 `ai-provider:v1:` 分享码与通用 JSON
-- **深度思考**：思考强度滑动条六档（Auto / Low / Medium / High / XHigh / Max），模型不支持的档位自动降级，新对话沿用上次的模型与强度；输入框可一键展开全屏编辑；按厂商自动转换参数（Claude adaptive thinking、OpenAI reasoning effort、Gemini thinkingConfig、DeepSeek/Qwen/GLM/Kimi 开关），思考过程可折叠；签名与加密推理内容会正确回传，多轮工具调用不丢上下文
-- **工具调用（Agent 循环）**：联网搜索（Bing 免 Key、Tavily、Exa、Brave、Serper、Jina、智谱、博查、Perplexity、SearXNG、LinkUp）、网页读取、长期记忆、计算器、时间、剪贴板、设备信息；运行前可要求确认
-- **坐标系显示**：在助手设置的本地工具中一键开启二维平面与三维空间绘图；助手可以在聊天里绘制函数、圆与圆锥曲线、渐近线、线段、三维曲面和坐标点。三维图表使用设备本地投影与深度排序渲染，无需外部生图服务；预览与全屏均支持单指旋转、双指平移和捏合缩放，全屏可编辑曲面、三维点位和坐标范围
-- **MCP**：远程 Streamable HTTP 与 SSE 服务器，按工具开关；聊天输入框「+」里的 MCP 抽屉显示实时连接状态并一键开关，会话过期自动重连；MCP 工具默认直接执行，不再逐次请求确认
-- **模型内置能力**：OpenAI / Claude / Gemini 原生联网搜索、Gemini URL 上下文、生图模型
-- **多模态**：图片、拍照、PDF / Word / PPT / Excel / EPUB / 代码等文档（本地提取文本）；拍照和相册图片会先进入裁剪器：图片居中留边，拖动边角裁剪、松手后选区自动放大回到中间，支持双指缩放、旋转和自由 / 原图 / 1:1 / 4:3 / 3:4 / 16:9 / 9:16 比例；Android 10 以下通过系统相册兼容入口选择图片
-- **聊天界面**：消息一直延伸到输入框后面，追问建议浮在消息上，输入区只在底部渐隐；模型和思考强度收进输入框的操作行，阅读区域更大；助手参数里的 Temperature / Top P 附带用途说明
-- **对话管理**：历史页支持置顶、侧滑删除与撤销、保留置顶并清理其余记录；消息搜索可按当前 / 所有助手筛选，按相关度或时间排序并高亮命中；另有分支、分叉、收藏、上下文压缩、Markdown 导出、本对话用量面板
-- **流式书写**：回复逐字落屏而不是整段跳出，落后的文字会自动追赶，结束时光标收束；中途停止会留下已经到达的内容并标记为「已停止生成」，可一键继续，下一轮对话仍把它当作上下文
-- **后台会话**：发送后立即进入侧栏，可切换到新对话而不打断旧回复；生成中的标题旁显示进度，Android 后台持续流式生成并在完成时按通知设置提醒；相册多选图片会逐张进入裁剪器，Android 回收进程后可以恢复尚未发送的相册和拍照附件。iOS 后台运行时间由系统限制。
-- **助手**：系统提示词变量、开场白、预设消息、消息模板、正则替换、世界书与模式注入、独立参数与背景图；导入 SillyTavern 角色卡（PNG / JSON，V1-V3）与世界书
-- **扩展抽屉**：在聊天里直接插入快捷短语、开关模式与世界书、查看和删除记忆
-- **扫码传输配置**：备份与恢复页把供应商、模型、助手、MCP、世界书等配置分成多张循环播放的二维码，另一台设备扫码即可导入，可选是否包含密钥
-- **其它**：翻译、绘图、朗读、标题与追问建议自动生成、用量统计、WebDAV 与本地备份、浅色 / 深色 / 六种主题色（背景、文字、卡片、渐变与通知都随主题色变化）、中英双语、平板双栏布局
-
-### 安全与隐私
-
-- API Key、WebDAV 密码、MCP 请求头存放在系统钥匙串 / Android Keystore，不写入普通文件
-- 所有数据只在 App 沙盒内；没有统计和广告；只会请求你配置的地址
-- 默认只允许 HTTPS，明文 HTTP 仅限本机回环地址（本地模型）
-- 权限按需申请：相机、相册、通知都只在你使用对应功能时询问
-
-### 安装
-
-到 [Releases](https://github.com/mizaawa/mewhub/releases) 下载：
-
-- **Android**：大多数手机选 `arm64-v8a.apk`，不确定就选 `universal.apk`
-- **iOS**：`ios-unsigned.ipa` 未签名，用 AltStore / SideStore / Sideloadly / TrollStore 安装（会用你自己的 Apple ID 重新签名）
-
-### 开发
-
-```bash
-flutter pub get
-flutter analyze
-flutter test
-flutter run
+```
+lib/stock/        纯数据与算法（不依赖 Flutter）
+lib/ui/stock/     K 线面板与交互
+lib/tools/        AI 工具（新增 8 个）
+lib/data/         世界书种子与默认值
 ```
 
-需要 Flutter 3.47+ / Dart 3.13+。Android 最低 7.0（API 24），iOS 最低 15.0。
+所以理论上可以把 `lib/stock/` 和 `lib/ui/stock/` 整体搬到任何 Flutter 项目里。
 
-### 发布新版本
+## 新增了什么
 
-1. 修改 `pubspec.yaml` 的 `version`
-2. 打标签并推送：`git tag v1.2.3 && git push origin v1.2.3`
-3. `Release` 工作流等待 Android 和 iOS 都构建成功，再把 APK、AAB、未签名 IPA 和两份 SHA-256 校验文件一起上传到草稿。全部校验通过后才公开版本。
+### 缠论引擎（Dart，从零实现）
 
-若有一端失败，在 Actions 中重跑失败的任务即可；不要在 Releases 页面提前公开草稿。已公开版本的附件不会被工作流覆盖。
-
-首次发布前，在仓库 Settings → Secrets and variables → Actions 中配置以下四个 Secrets。CI 主分支 APK 和 Release APK/AAB 都使用同一份 JKS；缺少任意一项时构建会失败，避免发布无法覆盖升级的临时签名包。
-
-| Secret | 说明 |
+| 文件 | 内容 |
 |---|---|
-| `ANDROID_KEYSTORE_BASE64` | JKS 文件的单行 Base64；PowerShell：`[Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path .\release.jks)))` |
-| `ANDROID_KEYSTORE_PASSWORD` | keystore 密码 |
-| `ANDROID_KEY_ALIAS` | key 别名 |
-| `ANDROID_KEY_PASSWORD` | key 密码 |
+| `lib/stock/tdx_formula.dart` | 通达信公式解释器（词法 / 语法 / 求值 / 序列函数），约 1050 行 |
+| `lib/stock/chanlun.dart` | 笔、中枢、背驰、三类买卖点 |
 
-请保管并备份原始 JKS 和密码，以后的版本继续使用同一密钥；如果已有正式签名密钥，应沿用原密钥。此前用临时 debug 签名安装的 APK 切换到固定签名时仍需卸载一次，此后同签名且 `versionCode` 不低于已安装版本即可覆盖升级。PR 只检查 debug 签名构建，不上传可安装的 APK。
+**不是调库，是自己解析通达信公式后计算。** 这让「口径」完全可控。
 
-如果还没有 JKS，可执行一次 `keytool -genkeypair -keystore release.jks -storetype JKS -alias mewhub -keyalg RSA -keysize 4096 -validity 10000` 创建，再将同一文件和密码保存为上面的 Secrets。CI 和 Release 使用各自的构建号；跨两种渠道安装时还需确认新 APK 的 `versionCode` 更高。
+验证标准（`tool/verify_golden.dart` 可复现）：
 
----
+```
+38 笔 / 4 中枢 / 16 条公式序列  逐值对齐参考实现（误差 ≤1e-6）
+中枢 183.86-158.95、140.80-123.49 与通达信真机截图一致
+```
 
-## English
+### 行情数据层
 
-MewHub is a multi-provider AI chat client inspired by [RikkaHub](https://github.com/rikkahub/rikkahub), rebuilt in Flutter for Android and iOS, with a milk-white theme and motion throughout.
+```
+lib/stock/stock_source.dart    三级降级：腾讯 → 新浪 → 东财
+lib/stock/minute.dart          分时
+lib/stock/stock_search.dart    搜索（A股 / ETF / 指数 / LOF）
+lib/stock/stock_fundamental.dart  估值 / 财报 / 龙虎榜
+```
 
-**Highlights:** native OpenAI Chat / OpenAI Responses / Anthropic / Gemini streaming; any compatible gateway with custom URLs, headers, bodies and key rotation; reasoning controls mapped per vendor; agent tool loop with web search, page reading, memory and MCP, with in-chat drawers to toggle MCP servers, modes, lorebooks and quick messages; an opt-in local coordinate plotting tool with 2D curves, interactive 3D surfaces (one-finger orbit, two-finger pan/zoom), points, segments, on-device rendering and full-screen editing; vision and document attachments; a RikkaHub-style cropper for camera and gallery photos (drag the corners, pinch to zoom, rotate, preset ratios); Android gallery selection with compatibility support for older devices; a chat list that runs behind a compact composer with model and reasoning controls inside the input; parallel background chats with Android streaming and completion notifications; a conversation history page with pinning, swipe-to-delete and undo, plus message search scoped by assistant with relevance/time sorting and highlighted matches; message branches, forks, favorites and context compression; replies that write themselves in character by character; editing a sent message always applies and regenerates, and a stopped reply keeps the text that arrived as context; assistants with lorebooks, regexes and SillyTavern card import; translation, image generation, TTS, usage stats, WebDAV backup and multi-code QR transfer of the whole configuration; light/dark themes with six accents that tint the whole interface, Chinese and English.
+三级降级不是设计癖好，是踩出来的：腾讯的 `web.ifzq` 域名曾被 WAF 拦成 501，整个面板刷不出图。
 
-**Privacy:** keys live in the iOS Keychain / Android Keystore; data stays in the app sandbox; no analytics; requests go only to endpoints you configure.
+### K 线面板
 
-**Install:** grab an APK (Android) or the unsigned IPA (iOS, sideload with AltStore/SideStore) from [Releases](https://github.com/mizaawa/mewhub/releases).
+`lib/ui/stock/stock_chart_panel.dart`（约 1800 行，自绘 Canvas）
 
-**Build:** `flutter pub get && flutter test && flutter run` (Flutter 3.47+). Push a `vX.Y.Z` tag to release. The workflow publishes only after the Android packages, unsigned iOS IPA and both checksum files have been uploaded and verified.
+- 周期：分时 / 日 / 周 / 月 / 60 / 30 / 15 / 5 分钟
+- 主图指标：MA、BOLL、缠论中枢与笔、空心 K
+- 副图指标：成交量、MACD、KDJ、RSI（**可多选**，一个不选只留主图）
+- 手势：双指缩放、拖动平移、垂直缩放、长按 300ms 十字光标
+- 搜索、自选分组（含分组管理）、AI 画线图层
+- 离线缓存：冷启动先出图（约 30ms），再后台刷新
 
-## License
+### AI 工具（8 个）
 
-[AGPL-3.0](LICENSE). MewHub's feature set follows RikkaHub (AGPL-3.0); the code here is an independent Flutter implementation.
+| 工具 | 作用 |
+|---|---|
+| `stock_kline` | 取 K 线，`period=minute` 时返回分时摘要 |
+| `analyze_chan` | 缠论分析，返回可直接引用的中文结论 |
+| `stock_quote` | 实时快照 |
+| `stock_levels` | 多只 × 多周期并行对照 |
+| `scan_stocks` | 批量扫描摘要，最多 20 只 |
+| `get_fundamental` | 估值 + 财报 + 龙虎榜 |
+| `chart_annotate` | 在图上画线，辅助解释正文 |
+| `stock_panel_show` | 把面板切到指定标的，让用户看到你在分析什么 |
+
+**设计原则：让模型自己决定。** 项目早期试过从用户原话里用正则猜股票代码，实测「给我分析下平安银行」因为词表里只有「分析一下」而漏判。后来删掉整套路，改成模型主动调用 `stock_panel_show` —— 它已经知道答案，不需要猜。
+
+### 世界书
+
+`lib/data/stock_defaults.dart` —— 缠论口径 5 条 + 基本面口径 1 条。
+
+**为什么用世界书而不是系统提示**：这些口径只在对应用户提到时才需要。塞进系统提示会全程占用上下文，且改动系统提示会让历史消息缓存全部失效。
+
+## 关键技术决策
+
+### 取数窗口必须够长
+
+缠论依赖左侧历史（`BARSLAST` / `SUMBARS`），窗口太短会在左沿凭空造出中枢。实测 300274 日线：
+
+| 根数 | 笔 | 中枢 |
+|---|---|---|
+| 200 | 14 | 1 |
+| 270 | 18 | 2 |
+| 300 | 20 | 3 |
+| 400 | 26 | 4 |
+| **640** | **38** | **4** |
+
+400 根起收敛。所以固定取 640，必要时用 `viewStart` 只裁显示范围，不影响计算。
+
+### 买卖点依赖「当前有效中枢」
+
+判据是 `s <= signalIdx`（中枢已开始形成），**不是** `e <= signalIdx`。
+
+因为中枢的右边界是**事后**才确定的，信号完全可能落在它形成过程中。早期用 `e` 判断会引用到几十根之前就结束、价格已经翻倍的中枢，结论看着成立但毫无实战价值。
+
+另外加了距离约束：信号价离中枢边界超过 1.5 倍中枢高度时不再判定。
+
+### 补零距离
+
+- `jsonEncode(NaN)` 会抛 `JsonUnsupportedObjectError`，所有对外输出的数字统一走 `r2()`（`lib/stock/numbers.dart`）
+- 原子写文件的 tmp 名必须唯一，否则并发写会互相覆盖
+- 批量请求要限流（`mapLimit`），40 个并发容易被接口拦
+
+## 构建
+
+GitHub Actions 自动双端出包。
+
+```bash
+# 依赖
+flutter pub get
+
+# 本地构建（需 Flutter 3.47+ / Dart 3.13+）
+flutter build apk --release
+```
+
+**注意**：Flutter 官方只提供 x64 Linux SDK。在 arm64 Linux 上无法本地构建，只能靠 CI。
+
+格式化必须符合 `analysis_options.yaml` 的 `page_width: 120`：
+
+```bash
+dart format --page-width 120 lib test
+```
+
+## 仓库结构
+
+```
+lib/
+├── ai/          供应商协议（OpenAI / Anthropic / Gemini）
+├── chat/        对话控制、提示构建
+├── core/        网络、路径、工具
+├── data/        数据模型、设置、世界书
+├── state/       全局状态
+├── stock/       ★ 股票数据与算法（不依赖 Flutter）
+├── tools/       ★ AI 工具（新增 8 个）
+├── ui/
+│   ├── chat/    对话界面
+│   ├── pages/   设置页
+│   └── stock/   ★ K 线面板、手势、搜索、自选
+└── main.dart
+
+docs/
+├── data-sources.md   ★ 行情接口实测结论（含踩坑记录）
+└── chan-kotlin.md    缠论口径说明
+
+tool/
+├── verify_golden.dart  ★ 缠论回归验证，可独立运行
+└── probe_sources.dart  接口探测脚本
+```
+
+## 已知限制
+
+1. **境外品种**（美股 / 指数 / 伦敦金）能取数做缠论，但**K 线面板只支持 A 股**
+2. `get_fundamental` 不含研发投入、分红、股东结构、一致预期
+3. 分时没有磁盘缓存（当天数据，隔天失效）
+4. 舆情 / 情绪面未做
+5. 缠论是 O(L²)，640 根约 30ms，但 2000 根以上需要优化
+
+## 验证
+
+```bash
+# 缠论回归（无需 Flutter，纯 Dart）
+dart run tool/verify_golden.dart
+```
+
+输出应包含 `★★★ 全部通过 ★★★` 与 38 笔 / 4 中枢 / 16 序列。
+
+## 许可
+
+本项目基于 [MewHub](https://github.com/mizaawa/mewhub)，沿用 **AGPL-3.0**。
+
+原始 MewHub 的完整说明见下方。
+
+<details>
+<summary>原版 MewHub 说明（点击展开）</summary>
+
+MewHub 是一个多供应商 AI 聊天客户端，功能参考 RikkaHub，用 Flutter 重写以同时支持 Android 与 iOS。界面是奶白色系，动画贯穿全程。
+
+- 四种协议原生实现：OpenAI Chat Completions、OpenAI Responses、Anthropic Messages、Google Gemini，全部流式输出
+- 任意第三方 API，多 Key 轮询，余额查询
+- 深度思考六档，按厂商自动转换参数
+- 工具调用（Agent 循环）：联网搜索、网页读取、长期记忆、计算器、时间、剪贴板、设备信息
+- MCP：远程 Streamable HTTP 与 SSE
+- 多模态：图片、拍照、PDF / Word / PPT / Excel / EPUB
+- 世界书、模式注入、角色卡导入
+- 后台会话、流式书写、分支与分叉
+
+详见 [原仓库](https://github.com/mizaawa/mewhub)。
+
+</details>
