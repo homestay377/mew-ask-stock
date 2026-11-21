@@ -165,6 +165,62 @@ void main() {
     }
   });
 
+  test('价格整体等比缩放不改变结构（防止引入绝对价位阈值）', () {
+    // 缠论的判断全是价格之间的比较关系，不该有「低于 5 元就算小盘」这种绝对阈值。
+    // 缩放后如果笔/中枢/买卖点数变了，说明某处偷偷用了绝对值或写死了价格范围。
+    final base = Chanlun.analyze(bars, formula);
+    List<Bar> scaled(double k) => [for (final b in bars) Bar(b.o * k, b.h * k, b.l * k, b.c * k, v: b.v, t: b.t)];
+
+    for (final k in [0.5, 2.0, 100.0]) {
+      final r = Chanlun.analyze(scaled(k), formula);
+      expect(r.pens.length, base.pens.length, reason: 'k=$k 笔数变了');
+      expect(r.boxes.length, base.boxes.length, reason: 'k=$k 中枢数变了');
+      expect(r.signals.length, base.signals.length, reason: 'k=$k 背驰数变了');
+      expect(r.points.length, base.points.length, reason: 'k=$k 买卖点数变了');
+      for (var i = 0; i < r.boxes.length; i++) {
+        expect(r.boxes[i].s, base.boxes[i].s, reason: 'k=$k 第 $i 个中枢起点变了');
+        expect(r.boxes[i].e, base.boxes[i].e, reason: 'k=$k 第 $i 个中枢终点变了');
+        expect(r.boxes[i].zg, closeTo(base.boxes[i].zg * k, 1e-6), reason: 'k=$k 第 $i 个中枢 ZG');
+        expect(r.boxes[i].zd, closeTo(base.boxes[i].zd * k, 1e-6), reason: 'k=$k 第 $i 个中枢 ZD');
+      }
+    }
+  });
+
+  test('除权跳空：后半段整体打 0.85 后不崩，结构仍自洽', () {
+    // 复权口径不一致（新浪备源是不复权的）就是这个形态：某一天之前之后是两个价位体系。
+    // 不要求结果好看，只要求：能算、索引不越界、边界不是 NaN。
+    final gapped = [
+      for (var i = 0; i < bars.length; i++)
+        if (i < 300)
+          bars[i]
+        else
+          Bar(bars[i].o * 0.85, bars[i].h * 0.85, bars[i].l * 0.85, bars[i].c * 0.85, v: bars[i].v, t: bars[i].t),
+    ];
+    final g = Chanlun.analyze(gapped, formula);
+    expect(g.pens, isNotEmpty, reason: '打折后仍应算得出笔');
+    for (final b in g.boxes) {
+      expect(b.s, lessThanOrEqualTo(b.e));
+      expect(b.zg.isFinite, isTrue);
+      expect(b.zd.isFinite, isTrue);
+    }
+    for (final p in g.points) {
+      expect(p.idx, inInclusiveRange(0, gapped.length - 1));
+    }
+  });
+
+  test('退化输入：空 / 单根 / 全等价价格都不抛异常且无结构', () {
+    final cases = <String, List<Bar>>{
+      '空列表': const [],
+      '单根': [Bar(10, 10.5, 9.5, 10, v: 100, t: 'd0')],
+      '全等价': [for (var i = 0; i < 120; i++) Bar(10, 10, 10, 10, v: 100, t: 'd$i')],
+    };
+    cases.forEach((name, input) {
+      final r = Chanlun.analyze(input, formula);
+      expect(r.boxes, isEmpty, reason: '$name 不该凭空造中枢');
+      expect(r.points, isEmpty, reason: '$name 不该有买卖点');
+    });
+  });
+
   test('性能：640 根在 2 秒内完成', () {
     final sw = Stopwatch()..start();
     Chanlun.analyze(bars, formula);

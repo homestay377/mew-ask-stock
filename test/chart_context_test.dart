@@ -101,4 +101,43 @@ void main() {
     );
     expect(ctx.renderText(), contains('没有选中'));
   });
+
+  test('复权口径、收盘状态、缓存与质量问题都要进入上下文', () {
+    // 这些字段来自数据层（P4），不是界面自己猜的。模型要靠它们判断该不该打折。
+    final ctx = ChartContext(
+      symbol: 'sz300274',
+      name: '阳光电源',
+      period: 'day',
+      source: 'sina',
+      adjust: '不复权',
+      closed: false,
+      dataAge: '3 小时前',
+      fromCache: true,
+      cacheAge: '2 分钟前',
+      qualityIssues: const ['有 1 根 OHLC 不自洽'],
+      refreshError: 'SocketException: 连接超时',
+      barCount: bars.length,
+      lastDate: '2026-11-20',
+      lastBarIsToday: true,
+      visibleStart: 0,
+      visibleCount: 120,
+      cursorIndex: 119,
+      cursorBar: bars.last,
+    );
+    final text = ctx.renderText();
+    expect(text, contains('不复权'));
+    expect(text, contains('还没走完'));
+    expect(text, contains('3 小时前'));
+    expect(text, contains('缓存数据'));
+    expect(text, contains('2 分钟前'));
+    expect(text, contains('SocketException'));
+    expect(text, contains('OHLC 不自洽'));
+
+    final j = ctx.toJson();
+    expect(j['adjust'], '不复权');
+    expect(j['last_bar_closed'], isFalse);
+    expect(j['from_cache'], isTrue);
+    expect(j['quality_issues'], isNotEmpty);
+    expect(j['refresh_error'], contains('SocketException'));
+  });
 }

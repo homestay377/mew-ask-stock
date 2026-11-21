@@ -108,6 +108,13 @@ class ChartContext {
     required this.lastBarIsToday,
     required this.visibleStart,
     required this.visibleCount,
+    this.adjust = '',
+    this.closed,
+    this.dataAge,
+    this.fromCache = false,
+    this.cacheAge,
+    this.qualityIssues = const [],
+    this.refreshError,
     this.cursorIndex,
     this.cursorBar,
     this.cursorIndicators,
@@ -130,6 +137,26 @@ class ChartContext {
   /// `tencent` / `sina` / `eastmoney`
   final String source;
   final int barCount;
+
+  /// 复权口径：`前复权` / `不复权`。空串 = 调用方没提供（未知）。
+  /// **不复权序列在除权日有跳空**，跨源对照时必须看这个字段。
+  final String adjust;
+
+  /// 最后一根 K 线是否已收盘。null = 判不出来（时间解析失败），不要猜。
+  final bool? closed;
+
+  /// 最后一根离现在多久，人话（`22 小时前`）。
+  final String? dataAge;
+
+  /// 当前显示的这份数据来自缓存，不是刚拉的网络数据。
+  final bool fromCache;
+  final String? cacheAge;
+
+  /// 数据质量体检的问题清单。空 = 没发现明显毛病。
+  final List<String> qualityIssues;
+
+  /// 后台刷新失败的原文。null = 上次刷新成功或还没刷新过。
+  final String? refreshError;
   final String lastDate;
 
   /// 最后一根 K 线的日期是否就是今天（说明这根可能还在形成中）
@@ -177,6 +204,13 @@ class ChartContext {
     'name': name,
     'period': period,
     'source': source,
+    if (adjust.isNotEmpty) 'adjust': adjust,
+    'last_bar_closed': closed,
+    'data_age': dataAge,
+    'from_cache': fromCache,
+    if (cacheAge != null) 'cache_age': cacheAge,
+    if (qualityIssues.isNotEmpty) 'quality_issues': qualityIssues,
+    if (refreshError != null) 'refresh_error': refreshError,
     'bar_count': barCount,
     'last_date': lastDate,
     'last_bar_is_today': lastBarIsToday,
@@ -238,6 +272,23 @@ class ChartContext {
       '数据源 $source，共 $barCount 根，最后一根 $lastDate'
       '${lastBarIsToday ? '（今天，可能还没收盘）' : ''}',
     );
+    if (adjust.isNotEmpty) {
+      final closeText = switch (closed) {
+        true => '已收盘',
+        false => '还没走完',
+        null => '收盘状态未知',
+      };
+      b.writeln('复权口径：$adjust；最后一根$closeText${dataAge == null ? '' : '（${dataAge}）'}');
+    }
+    if (fromCache) {
+      b.writeln(
+        '⚠ 当前显示的是缓存数据${cacheAge == null ? '' : '（${cacheAge}写入）'}，不是刚拉的'
+        '${refreshError == null ? '' : '；后台刷新失败：${refreshError}'}',
+      );
+    }
+    for (final issue in qualityIssues) {
+      b.writeln('⚠ 数据质量：$issue');
+    }
 
     final m = minuteInfo;
     if (m != null) {

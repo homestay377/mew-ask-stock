@@ -85,7 +85,10 @@ List<AppTool> buildStockTools({bool enabled = true}) {
       parameters: objectSchema({}),
       promptHint:
           '回答里引用具体日期和数值时，必须来自这个工具的结果；'
-          '没选中某根时就说明「当前没有选中 K 线」，不要编。',
+          '没选中某根时就说明「当前没有选中 K 线」，不要编。'
+          '读 adjust 确认复权口径（不复权的序列不能当连续历史用）；'
+          'last_bar_closed=false 说明最后一根还在走，别把它的收盘价当定值；'
+          'from_cache=true 且 cache_age 较大时，说明用户看到的是旧数据。',
       execute: (args) async {
         try {
           final ctx = await stockPanelRequest.snapshot();

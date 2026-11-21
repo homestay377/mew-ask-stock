@@ -434,6 +434,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
                 state: widget.state,
                 onCollapse: widget.state.collapse,
                 onAskBar: _canAsk ? _askAboutFocus : null,
+                onAskStructure: (_canAsk && _chanHitAt(_focusIdx) != null) ? _askAboutStructure : null,
                 onSearch: _openSearch,
                 onAddToWatch: _addCurrentToWatch,
                 onWatchlist: () => setState(() => _drawerOpen = !_drawerOpen),
@@ -646,7 +647,12 @@ class _StockChartPanelState extends State<StockChartPanel> {
 
     final warnings = <String>[];
     if (s.isFallback) {
-      warnings.add('当前用的是备源（${s.source}），不复权，除权日有跳空，缠论可能多出假信号');
+      warnings.add('当前用的是备源（${s.source}），${s.adjust}，除权日有跳空，缠论可能多出假信号');
+      final why = s.fallbackReason;
+      if (why != null) warnings.add('主源失败原因：$why');
+    }
+    if (s.clock.closed == false) {
+      warnings.add('最后一根还没收盘，高开低收还会变，别把它当成收盘价');
     }
 
     return ChartContext(
@@ -654,6 +660,14 @@ class _StockChartPanelState extends State<StockChartPanel> {
       name: s.name,
       period: s.period,
       source: s.source,
+      // 复权口径 / 收盘状态 / 缓存与质量：都来自数据层，不在界面里重新猜一遍
+      adjust: s.adjust,
+      closed: s.clock.closed,
+      dataAge: s.clock.age == null ? null : humanAge(s.clock.age!),
+      fromCache: s.fromCache,
+      cacheAge: s.cacheAge == null ? null : humanAge(s.cacheAge!),
+      qualityIssues: s.quality.issues,
+      refreshError: _refreshError,
       barCount: s.length,
       lastDate: s.last.t,
       lastBarIsToday: _isToday(s.last.t),
@@ -765,6 +779,80 @@ class _StockChartPanelState extends State<StockChartPanel> {
       buf.write('\n（注意：行情用的备源 ${s.source}，不复权，除权日有跳空）');
     }
     buf.write('\n这个位置的多空含义是什么？后续可能怎么走？');
+
+    widget.onAsk?.call(buf.toString());
+    setState(() {
+      _cross.clear();
+      _focus = -1;
+    });
+  }
+
+  /// 焦点那根 K 线上「挂着」的缠论结构。买卖点 > 背驰 > 中枢 > 笔端点，
+  /// 越靠前越具体，同一根只报一个，避免把一堆标签同时甩给模型。
+  _ChanHit? _chanHitAt(int idx) {
+    final ch = _chan;
+    if (ch == null || idx < 0) return null;
+
+    for (final p in ch.points) {
+      if (p.idx == idx) {
+        return _ChanHit('买卖点 ${p.label}', '${p.label} @${p.price.toStringAsFixed(2)}，判定依据：${p.reason}');
+      }
+    }
+    for (final sig in ch.signals) {
+      if (sig.idx == idx) {
+        final at = sig.price.toStringAsFixed(2);
+        return _ChanHit('背驰', '${sig.label} @$at，力度衰减 ${sig.strength}');
+      }
+    }
+
+    // 中枢：可能有前后重叠的多个，取起点最晚的那个（离这根最近）
+    ChanBox? box;
+    for (final b in ch.boxes) {
+      if (idx >= b.s && idx <= b.e && (box == null || b.s >= box.s)) box = b;
+    }
+    if (box != null) {
+      final span = box.e - box.s;
+      final third = span <= 0 ? 1 : (span ~/ 3).clamp(1, 9999);
+      final seg = idx < box.s + third ? '左段（刚进中枢）' : (idx > box.e - third ? '右段（接近离开）' : '中段');
+      return _ChanHit(
+        '中枢 ${box.tag}',
+        '${box.tag}[${box.s}-${box.e}]，ZG=${box.zg.toStringAsFixed(2)}，ZD=${box.zd.toStringAsFixed(2)}，'
+            '这一根在${seg}',
+      );
+    }
+
+    for (final pen in ch.pens) {
+      if (pen.idx == idx) {
+        return _ChanHit('笔端点', '${pen.type} @${pen.price.toStringAsFixed(2)}（第 ${pen.idx} 根）');
+      }
+    }
+    return null;
+  }
+
+  /// 「问这个结构」：把结构的真实区间、ZG/ZD、信号力度直接带上。
+  ///
+  /// 只问「为什么这样画」模型会泛泛而谈；带上具体数字它才可能引用到点上。
+  void _askAboutStructure() {
+    final s = _series;
+    final hit = _chanHitAt(_focusIdx);
+    if (s == null || hit == null) return;
+
+    final idx = _focusIdx;
+    final label = _periodLabels[widget.state.period] ?? widget.state.period;
+    final b = idx >= 0 && idx < s.bars.length ? s.bars[idx] : null;
+
+    final buf = StringBuffer()
+      ..write('请解释 ${s.name}(${s.symbol}) $label 图上的这个${hit.kind}：')
+      ..write('${hit.detail}。');
+    if (b != null) {
+      buf
+        ..write('这根 K 线（${b.t}）')
+        ..write('开 ${b.o.toStringAsFixed(2)}，高 ${b.h.toStringAsFixed(2)}，')
+        ..write('低 ${b.l.toStringAsFixed(2)}，收 ${b.c.toStringAsFixed(2)}。');
+    }
+    buf
+      ..write('\n这样画的依据在哪？')
+      ..write('如果后续 K 线让结构右边界变了（缠论会重绘），这个判断怎么算？');
 
     widget.onAsk?.call(buf.toString());
     setState(() {
@@ -911,12 +999,24 @@ class _CollapsedBar extends StatelessWidget {
   }
 }
 
+/// 焦点 K 线上挂着的缠论结构（用于「问结构」按钮）。
+class _ChanHit {
+  const _ChanHit(this.kind, this.detail);
+
+  /// `中枢 红` / `背驰` / `买卖点 一买` / `笔端点`
+  final String kind;
+
+  /// 带真实数字的一句话描述。
+  final String detail;
+}
+
 /// 级别行：周期切换 + 收起按钮。
 class _PeriodRow extends StatelessWidget {
   const _PeriodRow({
     required this.state,
     required this.onCollapse,
     this.onAskBar,
+    this.onAskStructure,
     this.onSearch,
     this.onAddToWatch,
     this.onWatchlist,
@@ -928,6 +1028,9 @@ class _PeriodRow extends StatelessWidget {
 
   /// 非空时显示「问」按钮（选中某根 K 线后才出现）。
   final VoidCallback? onAskBar;
+
+  /// 非空时显示「问结构」按钮（选中的那根落在笔/中枢/买卖点上才出现）。
+  final VoidCallback? onAskStructure;
 
   /// 右上角搜索。
   final VoidCallback? onSearch;
@@ -970,6 +1073,26 @@ class _PeriodRow extends StatelessWidget {
               ),
             ),
           ),
+          if (onAskStructure != null)
+            GestureDetector(
+              onTap: onAskStructure,
+              child: Container(
+                margin: const EdgeInsets.only(right: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: scheme.tertiary.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.insights_rounded, size: 12, color: scheme.tertiary),
+                    const SizedBox(width: 3),
+                    Text('问结构', style: TextStyle(fontSize: 11, color: scheme.tertiary)),
+                  ],
+                ),
+              ),
+            ),
           if (onAskBar != null)
             GestureDetector(
               onTap: onAskBar,
