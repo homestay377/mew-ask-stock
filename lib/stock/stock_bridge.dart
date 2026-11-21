@@ -6,7 +6,8 @@
 /// 这样做还有一个好处：**测试里可以换成假实现**，不必启动界面就能验证工具行为。
 library;
 
-import '../stock/stock_search.dart';
+import 'chart_context.dart';
+import 'stock_search.dart';
 
 /// 面板请求接口。
 abstract class StockPanelRequest {
@@ -24,6 +25,12 @@ abstract class StockPanelRequest {
 
   /// 通知面板重新读画线（AI 刚画完时调用）。
   void refreshShapes();
+
+  /// 当前图表的完整上下文快照（标的、周期、数据源、选中那根、指标值、缠论结构）。
+  ///
+  /// 返回 null 表示面板没挂载或还没加载出数据。
+  /// 这个方法可能触发指标计算，调用方不该高频轮询。
+  Future<ChartContext?> snapshot();
 }
 
 /// 默认实现：什么都不做（未接入 UI 时调用工具不会崩）。
@@ -42,6 +49,9 @@ class _NoopStockPanelRequest implements StockPanelRequest {
 
   @override
   void refreshShapes() {}
+
+  @override
+  Future<ChartContext?> snapshot() async => null;
 }
 
 StockPanelRequest _impl = _NoopStockPanelRequest();

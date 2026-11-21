@@ -185,3 +185,55 @@ List<double?> rsi(List<Bar> kl, {int period = 14}) {
   }
   return out;
 }
+
+/// 指标参数说明。
+///
+/// 只记录「模型解释数值时会用到」的信息：参数、基于什么算、会不会重绘。
+/// 不记录计算函数本身——那个在代码里，写在这里只会变成两份不一致的说明书。
+class IndicatorSpec {
+  const IndicatorSpec({
+    required this.key,
+    required this.label,
+    required this.params,
+    required this.basis,
+    this.repaints = false,
+  });
+
+  /// 输出序列的键前缀，如 `MA` / `MACD`
+  final String key;
+  final String label;
+
+  /// 参数，如 `5/10/20`
+  final String params;
+
+  /// 基于什么序列：`close` / `volume` / `high-low`
+  final String basis;
+
+  /// 是否可能随后续 K 线变化。
+  ///
+  /// 本项目所有指标都是纯价格序列计算，**全部 false**。
+  /// 留着这个字段是为了以后有人加带未来函数的指标时有个明确的落点。
+  final bool repaints;
+
+  String get summary => '$label($params)';
+}
+
+/// 本项目实现的所有指标。
+const List<IndicatorSpec> indicatorSpecs = [
+  IndicatorSpec(key: 'MA', label: 'MA', params: '5/10/20', basis: 'close'),
+  IndicatorSpec(key: 'BOLL', label: 'BOLL', params: '20, 2σ', basis: 'close'),
+  IndicatorSpec(key: 'MACD', label: 'MACD', params: '12/26/9', basis: 'close'),
+  IndicatorSpec(key: 'KDJ', label: 'KDJ', params: '9,3,3', basis: 'high-low-close'),
+  IndicatorSpec(key: 'RSI', label: 'RSI', params: '14', basis: 'close'),
+  IndicatorSpec(key: 'VOLMA', label: '量均', params: '5/10', basis: 'volume'),
+];
+
+/// 取若干指标的参数说明，压成一行。
+String indicatorParamLine(Iterable<String> keys) {
+  final want = keys.toSet();
+  final parts = <String>[];
+  for (final s in indicatorSpecs) {
+    if (want.contains(s.key)) parts.add(s.summary);
+  }
+  return parts.join('，');
+}

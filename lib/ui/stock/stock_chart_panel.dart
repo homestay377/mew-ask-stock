@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/paths.dart';
 import '../../stock/chanlun.dart';
+import '../../stock/chart_context.dart';
 import '../../stock/indicators.dart';
 import '../../stock/chart_shapes.dart';
 import '../../stock/shape_colors.dart';
@@ -216,6 +217,9 @@ class _PanelRequest implements StockPanelRequest {
 
   @override
   void refreshShapes() => notifyShapesChanged();
+
+  @override
+  Future<ChartContext?> snapshot() => _StockChartPanelState.buildSnapshot();
 }
 
 /// App 启动时调用一次，把真实实现交给工具层。
@@ -252,6 +256,10 @@ class _StockChartPanelState extends State<StockChartPanel> {
   final _viewport = ChartViewport();
   final _cross = CrosshairState();
 
+  /// 当前挂载的面板实例。工具层通过它取上下文快照。
+  /// 只会有一个（对话页只有一个 K 线面板）。
+  static _StockChartPanelState? _active;
+
   /// 当前指针指向的 K 线索引（用于「问这根」和顶部数值条）。
   int _focus = -1;
 
@@ -270,6 +278,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
   @override
   void initState() {
     super.initState();
+    _active = this;
     widget.state.addListener(_onStateChanged);
     unawaited(_watch.load());
     // AI 画完线会触发这个回调，重新读一次
@@ -279,6 +288,8 @@ class _StockChartPanelState extends State<StockChartPanel> {
 
   @override
   void dispose() {
+    // 只在确实是自己时才清，避免页面重建时把新实例的引用清了
+    if (identical(_active, this)) _active = null;
     // ★ 不要在这里 setShapesRefreshHook(null)：
     //   页面重建时新面板会先注册 hook，旧面板的 dispose 随后把它清掉，
     //   结果 AI 画完线新面板收不到通知。
@@ -422,7 +433,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
               if (_quote != null || _focusBar != null)
                 _QuoteBar(quote: _quote, focusBar: _focusBar, focusDate: _focusDate),
               if (_series?.isFallback == true) _fallbackNotice(scheme),
-              _IndBar(state: widget.state, onChange: _syncChan),
+              _IndBar(state: widget.state, onChange: _syncChan, onAskIndicator: _askAboutIndicator),
               Divider(height: 1, color: scheme.outlineVariant.withValues(alpha: 0.35)),
               Expanded(child: _buildBody(scheme)),
             ],
@@ -481,6 +492,159 @@ class _StockChartPanelState extends State<StockChartPanel> {
     );
   }
 
+  /// 长按指标 → 问「这个指标现在说明什么」。
+  ///
+  /// 直接把这根 K 线在该指标上的具体数值带上，模型不用再调一次工具，
+  /// 回答也能引用真实数字而不是泛泛而谈。
+  void _askAboutIndicator(String key) {
+    if (key == 'HOLLOW') return; // 空心K 是画法开关，不是指标
+
+    final s = _series;
+    if (s == null || s.bars.isEmpty) return;
+    final idx = _focusIdx >= 0 && _focusIdx < s.bars.length ? _focusIdx : s.bars.length - 1;
+    final bar = s.bars[idx];
+    final label = _periodLabels[widget.state.period] ?? widget.state.period;
+
+    final buf = StringBuffer();
+
+    // 缠论不是「数值指标」，单独问结构
+    if (key == 'CHAN') {
+      final ch = _chan;
+      buf.write('请基于缠论结构解读 ${s.name}(${s.symbol}) 的 $label 走势：');
+      if (ch == null) {
+        buf.write('当前还没算出结构，请先确认数据是否足够。');
+      } else {
+        buf
+          ..write(
+            '笔 ${ch.pens.length} 个、中枢 ${ch.boxes.length} 个、'
+            '背驰 ${ch.signals.length} 个、买卖点 ${ch.points.length} 个',
+          )
+          ..write('，现价${ch.stats.boxPosition ?? '位置未知'}。');
+        if (ch.boxes.isNotEmpty) {
+          final b = ch.boxes.last;
+          buf.write(
+            '最后中枢 ${b.tag}[${b.s}-${b.e}] '
+            'ZG=${b.zg.toStringAsFixed(2)}/ZD=${b.zd.toStringAsFixed(2)}。',
+          );
+        }
+        if (ch.unknownFunctions.isNotEmpty) {
+          buf.write('注意公式有未实现函数（${ch.unknownFunctions.take(3).join('、')}），结构可能不完整。');
+        }
+      }
+      buf.write('\n现在这个结构说明什么？');
+      widget.onAsk?.call(buf.toString());
+      return;
+    }
+
+    // 其余指标：算出这一根的具体值
+    final subs = <String>[if (key == 'VOL' || key == 'MACD' || key == 'KDJ' || key == 'RSI') key];
+    final ind = indicatorValuesAt(s.bars, idx, includeMa: key == 'MA', includeBoll: key == 'BOLL', subs: subs);
+
+    final paramKeys = <String>[if (key == 'VOL') 'VOLMA', if (key != 'VOL') key];
+    final params = indicatorParamLine(paramKeys);
+
+    buf
+      ..write('请解读 ${s.name}(${s.symbol}) 的 ${indLabel(key)} 指标')
+      ..write(params.isEmpty ? '' : '（参数 $params）')
+      ..write('在 ${bar.t} 这根 $label K线（收 ${bar.c.toStringAsFixed(2)}）上的表现：')
+      ..write(ind.renderText())
+      ..write('。');
+
+    if (ind.values.values.every((v) => v == null)) {
+      buf.write('\n（该指标在当前根还没有有效值，可能是数据不足）');
+    }
+    buf.write('\n现在这个指标说明什么？');
+    widget.onAsk?.call(buf.toString());
+  }
+
+  /// 给工具层用的上下文快照。
+  ///
+  /// 只在模型真的问「当前图表」时才被调用，所以这里可以稍微多算一点
+  /// （指标值要跑一遍 MA/BOLL/MACD），但也不该被高频轮询。
+  static Future<ChartContext?> buildSnapshot() async => _active?._snapshot();
+
+  Future<ChartContext?> _snapshot() async {
+    if (!mounted) return null;
+
+    final st = widget.state;
+
+    // 分时：结构完全不同，单独组织
+    final m = _minute;
+    if (m != null) {
+      return ChartContext(
+        symbol: m.symbol,
+        name: m.name,
+        period: 'minute',
+        source: 'tencent',
+        barCount: m.points.length,
+        lastDate: m.date,
+        lastBarIsToday: _isToday(m.date),
+        visibleStart: 0,
+        visibleCount: m.points.length,
+        minuteInfo: m,
+      );
+    }
+
+    final s = _series;
+    if (s == null || s.bars.isEmpty) return null;
+
+    // 选中那根：优先十字光标，其次最后一次点选
+    final idx = _focusIdx;
+    final hasCursor = idx >= 0 && idx < s.bars.length;
+    final bar = hasCursor ? s.bars[idx] : null;
+
+    final main = <String>[];
+    for (final k in mainIndKeys) {
+      if (st.mainOn[k] ?? false) main.add(indLabel(k, hollow: st.hollow));
+    }
+    final subs = st.subInds;
+
+    IndicatorValues? ind;
+    if (hasCursor) {
+      ind = indicatorValuesAt(s.bars, idx, includeMa: st.showMA, includeBoll: st.showBoll, subs: subs);
+    }
+
+    final warnings = <String>[];
+    if (s.isFallback) {
+      warnings.add('当前用的是备源（${s.source}），不复权，除权日有跳空，缠论可能多出假信号');
+    }
+
+    return ChartContext(
+      symbol: s.symbol,
+      name: s.name,
+      period: s.period,
+      source: s.source,
+      barCount: s.length,
+      lastDate: s.last.t,
+      lastBarIsToday: _isToday(s.last.t),
+      visibleStart: _viewport.start,
+      visibleCount: _viewport.visible,
+      cursorIndex: hasCursor ? idx : null,
+      cursorBar: bar,
+      cursorIndicators: ind,
+      mainIndicators: main,
+      subIndicators: subs,
+      penCount: _chan?.pens.length ?? 0,
+      boxCount: _chan?.boxes.length ?? 0,
+      signalCount: _chan?.signals.length ?? 0,
+      pointCount: _chan?.points.length ?? 0,
+      chanBoxPosition: _chan?.stats.boxPosition,
+      chanUnknownFunctions: _chan?.unknownFunctions ?? const [],
+      warnings: warnings,
+    );
+  }
+
+  /// K 线时间戳是否就是今天（说明最后一根可能还没收盘）。
+  static bool _isToday(String stamp) {
+    final now = DateTime.now();
+    final y = now.year.toString().padLeft(4, '0');
+    final mo = now.month.toString().padLeft(2, '0');
+    final d = now.day.toString().padLeft(2, '0');
+    final today = '$y-$mo-$d';
+    final compact = '$y$mo$d';
+    return stamp.startsWith(today) || stamp.startsWith(compact);
+  }
+
   /// 静默重读画线：AI 刚画完时调用，不重取 K 线。
   Future<void> _reloadShapesSilently() async {
     // 收起状态下不重载：省一次读盘和重建
@@ -533,15 +697,36 @@ class _StockChartPanelState extends State<StockChartPanel> {
     final b = _focusBar;
     final s = _series;
     if (b == null || s == null) return;
+    final idx = _focusIdx;
     final label = _periodLabels[widget.state.period] ?? widget.state.period;
+
+    // 把指标值直接带上：用户点「问这根」就是想知道这一根的含义，
+    // 如果还要模型再调一次工具拿指标，多一轮往返且容易漏。
+    final ind = indicatorValuesAt(
+      s.bars,
+      idx,
+      includeMa: widget.state.showMA,
+      includeBoll: widget.state.showBoll,
+      subs: widget.state.subInds,
+    );
+
     // ★ 汉字紧跟标识符会被当成变量名的一部分（$labelK线 → 变量 labelK线），必须断开。
-    final text =
-        '请解读 ${s.name}(${s.symbol}) 在 ${b.t} 这根 ${label}K线：'
-        '开 ${b.o.toStringAsFixed(2)}，高 ${b.h.toStringAsFixed(2)}，'
-        '低 ${b.l.toStringAsFixed(2)}，收 ${b.c.toStringAsFixed(2)}，'
-        '量 ${b.v.toStringAsFixed(0)}。'
-        '这个位置的多空含义是什么？后续可能怎么走？';
-    widget.onAsk?.call(text);
+    final buf = StringBuffer()
+      ..write('请解读 ${s.name}(${s.symbol}) 在 ${b.t} 这根 $label K线：')
+      ..write('开 ${b.o.toStringAsFixed(2)}，高 ${b.h.toStringAsFixed(2)}，')
+      ..write('低 ${b.l.toStringAsFixed(2)}，收 ${b.c.toStringAsFixed(2)}，')
+      ..write('量 ${b.v.toStringAsFixed(0)}。');
+
+    final indText = ind.renderText();
+    if (ind.values.isNotEmpty && indText != '（无有效值）') {
+      buf.write('\n当前开启的指标在这一根的值：$indText');
+    }
+    if (s.isFallback) {
+      buf.write('\n（注意：行情用的备源 ${s.source}，不复权，除权日有跳空）');
+    }
+    buf.write('\n这个位置的多空含义是什么？后续可能怎么走？');
+
+    widget.onAsk?.call(buf.toString());
     setState(() {
       _cross.clear();
       _focus = -1;
@@ -801,10 +986,13 @@ class _PeriodRow extends StatelessWidget {
 /// 左侧主图指标（MA/BOLL/缠论/空心K），右侧副图指标（量/MACD/KDJ/RSI）。
 /// 中间一条细分隔线，两侧互不干扰地各自滚动。
 class _IndBar extends StatelessWidget {
-  const _IndBar({required this.state, required this.onChange});
+  const _IndBar({required this.state, required this.onChange, this.onAskIndicator});
 
   final StockPanelState state;
   final VoidCallback onChange;
+
+  /// 长按某个指标时询问它现在的含义。为 null 时不响应。
+  final void Function(String key)? onAskIndicator;
 
   @override
   Widget build(BuildContext context) {
@@ -834,6 +1022,7 @@ class _IndBar extends StatelessWidget {
                                 state.toggleMain(k);
                                 onChange();
                               },
+                              onLongPress: onAskIndicator == null ? null : () => onAskIndicator!(k),
                             ),
                         ],
                       ),
@@ -1115,11 +1304,12 @@ class _MinutePainter extends CustomPainter {
 }
 
 class _Chip extends StatelessWidget {
-  const _Chip({required this.label, required this.selected, required this.onTap});
+  const _Chip({required this.label, required this.selected, required this.onTap, this.onLongPress});
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -1128,6 +1318,7 @@ class _Chip extends StatelessWidget {
       padding: const EdgeInsets.only(right: 4),
       child: GestureDetector(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
           decoration: BoxDecoration(

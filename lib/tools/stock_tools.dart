@@ -72,6 +72,36 @@ List<AppTool> buildStockTools({bool enabled = true}) {
 
   return [
     AppTool(
+      name: 'chart_context',
+      displayName: '当前图表',
+      description:
+          '读取用户此刻正在看的 K 线图：标的、周期、数据源、可视范围、'
+          '十字光标选中的那一根 K 线及其当前指标值、缠论结构摘要。\n'
+          '当用户说「这根」「现在这个图」「当前指标」「我选中这个」时，'
+          '先调它拿到真实数据，不要根据文字猜他在看什么。\n'
+          '无需参数，返回的就是面板当前状态。',
+      parameters: objectSchema({}),
+      promptHint:
+          '回答里引用具体日期和数值时，必须来自这个工具的结果；'
+          '没选中某根时就说明「当前没有选中 K 线」，不要编。',
+      execute: (args) async {
+        try {
+          final ctx = await stockPanelRequest.snapshot();
+          if (ctx == null) {
+            return jsonEncode({
+              'error':
+                  'K 线面板没有打开或还没有数据。可以让用户先打开图表，'
+                  '或者直接用 stock_kline / analyze_chan 按代码和周期取数。',
+            });
+          }
+          return jsonEncode({'text': ctx.renderText(), 'detail': ctx.toJson()});
+        } catch (e) {
+          return jsonEncode({'error': '$e'});
+        }
+      },
+    ),
+
+    AppTool(
       name: 'stock_kline',
       displayName: 'K线',
       description:
