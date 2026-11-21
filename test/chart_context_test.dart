@@ -52,7 +52,10 @@ void main() {
   test('只开 MACD 时不含 MA / BOLL 的键', () {
     final v = indicatorValuesAt(bars, 100, includeMa: false, includeBoll: false, subs: const ['MACD']);
     expect(v.values.keys, containsAll(['MACD_DIF', 'MACD_DEA', 'MACD_BAR']));
-    expect(v.values.keys.any((k) => k.startsWith('MA')), isFalse);
+    // ★ 不能用 startsWith('MA')：MACD_DIF 也以 MA 开头，那个断言永远为真。
+    expect(v.values.containsKey('MA5'), isFalse);
+    expect(v.values.containsKey('MA10'), isFalse);
+    expect(v.values.containsKey('MA20'), isFalse);
     expect(v.values.keys.any((k) => k.startsWith('BOLL')), isFalse);
   });
 
