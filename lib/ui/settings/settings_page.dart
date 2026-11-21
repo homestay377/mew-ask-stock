@@ -152,6 +152,7 @@ class SettingsPage extends StatelessWidget {
                   nav(Icons.menu_book_outlined, t('世界书 / 模式', 'Lorebooks & modes'), '/settings/prompts'),
                   nav(Icons.short_text_rounded, t('快捷短语', 'Quick messages'), '/settings/quick'),
                   nav(Icons.psychology_outlined, t('记忆', 'Memories'), '/settings/memory'),
+                  nav(Icons.smart_toy_outlined, t('子智能体', 'Sub-agents'), '/settings/subagents'),
                 ],
               ),
               SettingsGroup(
