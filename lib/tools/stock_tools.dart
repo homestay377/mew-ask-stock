@@ -258,32 +258,37 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           final az = await analyzer();
 
           // 并行：股票 × 周期 全部同时发，接口本身有缓存兜底。
-          final results = await Future.wait([
-            for (final sym in list)
-              Future.wait([
-                for (final p in periods)
-                  az
-                      .analyze(sym, period: p, count: bars)
-                      .then<Map<String, dynamic>>(
-                        (r) => {
-                          'period': StockAnalyzer.periodName(p),
-                          'bars': r.series.length,
-                          'close': r.series.last.c,
-                          'pens': r.chan.pens.length,
-                          'boxes': r.chan.boxes.length,
-                          'box_position': r.chan.stats.boxPosition,
-                          'last_signals': [
-                            for (final s in r.chan.signals.take(2))
-                              {'label': s.label, 'price': r2(s.price), 'strength': s.strength},
-                          ],
-                          'last_points': [
-                            for (final pt in r.chan.points.take(2)) {'label': pt.label, 'price': r2(pt.price)},
-                          ],
-                        },
-                      )
-                      .catchError((Object e) => {'period': p, 'error': '$e'}),
-              ]),
-          ]);
+          // 8 只 × 5 周期 = 40 个请求，全部并发容易触发限流。按股票分批，一次 4 只。
+          // 两级限流：外层按股票 3 只，内层按周期 3 个 → 峰值 9 个请求。
+          // 全放开的话 8 只 × 5 周期 = 40 个并发，容易被限流。
+          final results = await mapLimit(
+            list,
+            3,
+            (String sym) => mapLimit(
+              periods,
+              3,
+              (String p) => az
+                  .analyze(sym, period: p, count: bars)
+                  .then<Map<String, dynamic>>(
+                    (r) => {
+                      'period': StockAnalyzer.periodName(p),
+                      'bars': r.series.length,
+                      'close': r.series.last.c,
+                      'pens': r.chan.pens.length,
+                      'boxes': r.chan.boxes.length,
+                      'box_position': r.chan.stats.boxPosition,
+                      'last_signals': [
+                        for (final s in r.chan.signals.take(2))
+                          {'label': s.label, 'price': r2(s.price), 'strength': s.strength},
+                      ],
+                      'last_points': [
+                        for (final pt in r.chan.points.take(2)) {'label': pt.label, 'price': r2(pt.price)},
+                      ],
+                    },
+                  )
+                  .catchError((Object e) => {'period': p, 'error': '$e'}),
+            ),
+          );
 
           final payload = <String, dynamic>{
             'symbols': list,
@@ -433,34 +438,37 @@ List<AppTool> buildStockTools({bool enabled = true}) {
 
           final az = await analyzer();
           // 全部并行。单只失败不影响其他。
-          final rows = await Future.wait([
-            for (final sym in symbols)
-              Future.wait([
-                source.quoteCached(sym).then<Quote?>((q) => q).catchError((Object _) => null),
-                az
-                    .analyze(sym, period: period, count: 400)
-                    .then<StockAnalysis?>((r) => r)
-                    .catchError((Object _) => null),
-              ]).then((pair) {
-                final q = pair[0] as Quote?;
-                final r = pair[1] as StockAnalysis?;
-                if (r == null) {
-                  return {'symbol': sym, 'error': '取数失败'};
-                }
-                return {
-                  'symbol': r.series.symbol,
-                  'name': r.series.name,
-                  if (q != null) 'price': q.price,
-                  if (q != null) 'change_pct': r2(q.changePct),
-                  'close': r.series.last.c,
-                  'boxes': r.chan.boxes.length,
-                  'box_position': r.chan.stats.boxPosition,
-                  'last_point': r.chan.points.isEmpty ? null : r.chan.points.last.label,
-                  'last_point_price': r.chan.points.isEmpty ? null : r2(r.chan.points.last.price),
-                  'last_signal': r.chan.signals.isEmpty ? null : r.chan.signals.last.label,
-                };
-              }),
-          ]);
+          // 20 只 × 2 请求 = 40 个并发，容易被限流。按股票分批，一次 6 只。
+          final rows = await mapLimit(
+            symbols,
+            6,
+            (String sym) =>
+                Future.wait([
+                  source.quoteCached(sym).then<Quote?>((q) => q).catchError((Object _) => null),
+                  az
+                      .analyze(sym, period: period, count: 400)
+                      .then<StockAnalysis?>((r) => r)
+                      .catchError((Object _) => null),
+                ]).then((pair) {
+                  final q = pair[0] as Quote?;
+                  final r = pair[1] as StockAnalysis?;
+                  if (r == null) {
+                    return {'symbol': sym, 'error': '取数失败'};
+                  }
+                  return {
+                    'symbol': r.series.symbol,
+                    'name': r.series.name,
+                    if (q != null) 'price': q.price,
+                    if (q != null) 'change_pct': r2(q.changePct),
+                    'close': r.series.last.c,
+                    'boxes': r.chan.boxes.length,
+                    'box_position': r.chan.stats.boxPosition,
+                    'last_point': r.chan.points.isEmpty ? null : r.chan.points.last.label,
+                    'last_point_price': r.chan.points.isEmpty ? null : r2(r.chan.points.last.price),
+                    'last_signal': r.chan.signals.isEmpty ? null : r.chan.signals.last.label,
+                  };
+                }),
+          );
 
           return jsonEncode({'period': StockAnalyzer.periodName(period), 'count': rows.length, 'results': rows});
         } catch (e) {

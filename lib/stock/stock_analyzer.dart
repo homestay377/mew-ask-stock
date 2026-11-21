@@ -6,6 +6,7 @@ library;
 
 import 'chanlun.dart';
 import 'numbers.dart';
+import 'stock_fundamental.dart';
 import 'stock_source.dart';
 
 /// 单个标的的缠论分析结果（含渲染好的中文摘要）。
@@ -80,13 +81,15 @@ class StockAnalyzer {
   /// 渲染成中文摘要。数字保留两位小数，避免模型看到一长串浮点尾数。
   static String renderSummary(KlineSeries s, ChanResult r) {
     final b = StringBuffer();
+    // 空列表直接返回说明，避免 s.last / s.first 抛 RangeError
+    if (s.bars.isEmpty) return '【${s.name} ${s.symbol}】没有拿到 K 线数据。';
     final last = s.last;
 
     b.writeln('【${s.name} ${s.symbol} · ${periodName(s.period)}】');
     b.writeln(
       'K 线 ${s.length} 根（${s.first.t} 至 ${last.t}），'
-      '最新 ${last.c.toStringAsFixed(2)}，'
-      '开 ${last.o.toStringAsFixed(2)} 高 ${last.h.toStringAsFixed(2)} 低 ${last.l.toStringAsFixed(2)}',
+      '最新 ${fmtNum(last.c)}，'
+      '开 ${fmtNum(last.o)} 高 ${fmtNum(last.h)} 低 ${fmtNum(last.l)}',
     );
 
     b.writeln('笔 ${r.pens.length} 个，中枢 ${r.boxes.length} 个');
@@ -96,7 +99,7 @@ class StockAnalyzer {
       for (final box in r.boxes) {
         b.writeln(
           '  ${box.tag}[${box.s}-${box.e}] '
-          'ZG=${box.zg.toStringAsFixed(2)} ZD=${box.zd.toStringAsFixed(2)}',
+          'ZG=${fmtNum(box.zg)} ZD=${fmtNum(box.zd)}',
         );
       }
       final pos = r.stats.boxPosition;
@@ -107,7 +110,7 @@ class StockAnalyzer {
       b.writeln('背驰信号 ${r.signals.length} 个：');
       for (final sig in r.signals) {
         b.writeln(
-          '  ${sig.label} @${sig.price.toStringAsFixed(2)} '
+          '  ${sig.label} @${fmtNum(sig.price)} '
           '（索引 ${sig.idx}，力度衰减 ${sig.strength}）',
         );
       }
@@ -118,7 +121,7 @@ class StockAnalyzer {
     if (r.points.isNotEmpty) {
       b.writeln('买卖点 ${r.points.length} 个：');
       for (final p in r.points) {
-        b.writeln('  ${p.label} @${p.price.toStringAsFixed(2)} —— ${p.reason}');
+        b.writeln('  ${p.label} @${fmtNum(p.price)} —— ${p.reason}');
       }
     } else {
       b.writeln('没有识别到三类买卖点。');

@@ -26,3 +26,32 @@ bool sameNum(double? a, double? b) {
   if (!a.isFinite || !b.isFinite) return false;
   return (a - b).abs() < 1e-9;
 }
+
+/// 原子写文件的临时文件名序号。
+///
+/// 同一文件可能有并发写（面板后台刷新 + AI 画线保存），共用一个 `.tmp`
+/// 会互相覆盖。用自增序号保证唯一，比时间戳可靠（同一微秒内可能重复）。
+int _tmpSeq = 0;
+
+/// 取一个进程内唯一的临时文件后缀。
+int nextTmpSeq() => ++_tmpSeq;
+
+/// 带并发上限的 map。
+///
+/// 批量扫描 20 只股票时，如果全部并发会一次打出 40 个请求，
+/// 很容易触发接口限流甚至 WAF。限制在个位数既够快也不会被当成攻击。
+Future<List<R>> mapLimit<T, R>(List<T> items, int limit, Future<R> Function(T) fn) {
+  final results = List<R?>.filled(items.length, null);
+  var next = 0;
+
+  Future<void> worker() async {
+    while (true) {
+      final i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]);
+    }
+  }
+
+  final workers = <Future<void>>[for (var i = 0; i < (limit < items.length ? limit : items.length); i++) worker()];
+  return Future.wait(workers).then((_) => [for (final r in results) r as R]);
+}

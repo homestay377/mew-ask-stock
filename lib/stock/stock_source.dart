@@ -16,6 +16,7 @@ import 'package:gbk_codec/gbk_codec.dart';
 
 import 'chanlun.dart';
 import 'minute.dart';
+import 'numbers.dart';
 import 'stock_fundamental.dart';
 import 'stock_search.dart';
 
@@ -740,7 +741,9 @@ class StockSource {
       final f = _diskFile(code, period, count);
       if (dir == null || f == null) return;
       if (!await dir.exists()) await dir.create(recursive: true);
-      final tmp = File('${f.path}.tmp');
+      // ★ tmp 名必须唯一：同一文件的两次并发写（比如后台刷新 + 前台保存）
+      //   如果共用一个 .tmp，会互相覆盖，rename 时还可能拿到半个文件。
+      final tmp = File('${f.path}.${nextTmpSeq()}.tmp');
       await tmp.writeAsString(jsonEncode(s.toDisk()), flush: true);
       await tmp.rename(f.path);
       unawaited(_pruneDisk(dir));

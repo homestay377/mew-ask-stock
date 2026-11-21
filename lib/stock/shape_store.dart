@@ -10,6 +10,7 @@ import 'dart:io';
 
 import '../../core/paths.dart';
 import 'chart_shapes.dart';
+import 'numbers.dart';
 
 /// 画线持久化：按「代码|周期」分别存。
 ///
@@ -72,7 +73,9 @@ class ShapeStore {
       if (all == null) return;
       final f = _file();
       await f.parent.create(recursive: true);
-      final tmp = File('${f.path}.tmp');
+      // ★ tmp 名必须唯一：同一文件的两次并发写（比如后台刷新 + 前台保存）
+      //   如果共用一个 .tmp，会互相覆盖，rename 时还可能拿到半个文件。
+      final tmp = File('${f.path}.${nextTmpSeq()}.tmp');
       await tmp.writeAsString(
         jsonEncode({
           for (final e in all.entries) e.key: [for (final s in e.value) s.toJson()],

@@ -85,7 +85,9 @@ List<Lorebook> defaultStockLorebooks() => [
       LoreEntry(
         id: '00000000-0000-4000-8000-0000000000c6',
         name: '基本面口径',
-        keywords: ['PE', 'PB', '市盈率', '市净率', '估值', '财报', '营收', '净利', '业绩', '龙虎榜', 'ROE', '毛利率'],
+        // ★ 不要放 'PE' / 'PB'：World Book 用 contains 匹配，
+        //   'pe' 会命中 hopeful / type 这类英文词，造成莫名注入。
+        keywords: ['市盈率', '市净率', '估值', '财报', '营收', '净利', '业绩', '龙虎榜', 'ROE', '毛利率'],
         scanDepth: 3,
         priority: 55,
         content:

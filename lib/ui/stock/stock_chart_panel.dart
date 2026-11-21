@@ -157,7 +157,8 @@ class StockPanelState extends ChangeNotifier {
       final per = j['period']?.toString();
       final nm = j['name']?.toString();
       if (sym != null && sym.isNotEmpty) _symbol = sym;
-      if (per != null && per.isNotEmpty) _period = per;
+      // 文件可能被改坏或来自旧版本：只接受已知周期，否则保持默认
+      if (per != null && _periodLabels.containsKey(per)) _period = per;
       if (nm != null && nm.isNotEmpty) _name = nm;
       notifyListeners();
     } catch (_) {
@@ -278,7 +279,10 @@ class _StockChartPanelState extends State<StockChartPanel> {
 
   @override
   void dispose() {
-    setShapesRefreshHook(null);
+    // ★ 不要在这里 setShapesRefreshHook(null)：
+    //   页面重建时新面板会先注册 hook，旧面板的 dispose 随后把它清掉，
+    //   结果 AI 画完线新面板收不到通知。
+    //   _reloadShapesSilently 里有 mounted 检查，旧实例被调用也只会直接返回。
     widget.state.removeListener(_onStateChanged);
     // 共享数据源不关：其他面板/工具还在用同一条连接与缓存。
     super.dispose();
@@ -479,7 +483,8 @@ class _StockChartPanelState extends State<StockChartPanel> {
 
   /// 静默重读画线：AI 刚画完时调用，不重取 K 线。
   Future<void> _reloadShapesSilently() async {
-    if (!mounted) return;
+    // 收起状态下不重载：省一次读盘和重建
+    if (!mounted || !widget.state.expanded) return;
     final shapes = await ShapeStore.instance.load(widget.state.symbol, widget.state.period);
     if (!mounted) return;
     setState(() => _shapes = shapes);

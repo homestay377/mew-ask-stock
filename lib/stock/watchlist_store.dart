@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import 'dart:io';
 
 import '../../core/paths.dart';
+import 'numbers.dart';
 
 /// 一个分组。
 class WatchGroup {
@@ -112,7 +113,9 @@ class WatchlistStore extends ChangeNotifier {
     try {
       final f = _file();
       await f.parent.create(recursive: true);
-      final tmp = File('${f.path}.tmp');
+      // ★ tmp 名必须唯一：同一文件的两次并发写（比如后台刷新 + 前台保存）
+      //   如果共用一个 .tmp，会互相覆盖，rename 时还可能拿到半个文件。
+      final tmp = File('${f.path}.${nextTmpSeq()}.tmp');
       await tmp.writeAsString(
         jsonEncode({
           _kGroups: [for (final g in _groups) g.toJson()],
