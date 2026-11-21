@@ -31,6 +31,8 @@ String toolLabel(String name) {
     'memory_update' => t('更新记忆', 'Update memory'),
     'memory_delete' => t('删除记忆', 'Forget'),
     'web_search' => t('内置搜索', 'Built-in search'),
+    'dispatch_subagents' => t('子智能体分派', 'Sub-agent dispatch'),
+    'discuss_subagents' => t('子智能体讨论', 'Sub-agent discussion'),
     _ => name,
   };
 }
@@ -46,6 +48,7 @@ IconData toolIcon(String name) {
     'calculate' => Icons.calculate_outlined,
     'plot_cartesian' || 'plot_spatial' => Icons.grid_on_rounded,
     'memory_save' || 'memory_update' || 'memory_delete' => Icons.bookmark_added_outlined,
+    'dispatch_subagents' || 'discuss_subagents' => Icons.smart_toy_outlined,
     _ => Icons.build_circle_outlined,
   };
 }
@@ -113,7 +116,14 @@ class _ToolCardState extends State<ToolCard> {
   String _summary() {
     final input = widget.part.inputJson;
     final v =
-        input['title'] ?? input['query'] ?? input['url'] ?? input['expression'] ?? input['content'] ?? input['action'];
+        input['title'] ??
+        input['tool_title'] ??
+        input['topic'] ??
+        input['query'] ??
+        input['url'] ??
+        input['expression'] ??
+        input['content'] ??
+        input['action'];
     return v == null ? '' : truncate(v.toString(), 60);
   }
 
@@ -207,6 +217,7 @@ class _ToolCardState extends State<ToolCard> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               header,
+              _SubAgentTrace(part: p),
               if (plotError != null)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
@@ -333,4 +344,145 @@ class _CitationChip extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 子智能体的过程与结果。
+///
+/// 跑的时候显示 `meta.progress`（引擎每开工一个子智能体就推一行），跑完显示
+/// 每个子智能体的步数、耗时、token 和结论开头；完整 JSON 仍在展开区里。
+/// 只处理 dispatch_subagents / discuss_subagents，别的工具不留任何占位。
+class _SubAgentTrace extends StatelessWidget {
+  const _SubAgentTrace({required this.part});
+
+  final ToolPart part;
+
+  bool get _isSubAgent => part.name == 'dispatch_subagents' || part.name == 'discuss_subagents';
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_isSubAgent) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    final style = Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant);
+    final progress = [
+      for (final e in (part.meta?['progress'] as List?) ?? const [])
+        if (e is String && e.trim().isNotEmpty) e,
+    ];
+    final rows = _rows();
+    if (progress.isEmpty && rows.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final line in progress) Text('· $line', style: style),
+          if (rows.isNotEmpty && progress.isNotEmpty) const SizedBox(height: 6),
+          for (final r in rows)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    r.ok ? Icons.check_circle_outline_rounded : Icons.error_outline_rounded,
+                    size: 14,
+                    color: r.ok ? scheme.primary : scheme.error,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(
+                                text: r.label,
+                                style: const TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                              if (r.detail.isNotEmpty)
+                                TextSpan(
+                                  text: '  ${r.detail}',
+                                  style: TextStyle(color: scheme.onSurfaceVariant),
+                                ),
+                            ],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        if (r.text.isNotEmpty) Text(r.text, maxLines: 2, overflow: TextOverflow.ellipsis, style: style),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  List<_SubAgentRow> _rows() {
+    final raw = part.output;
+    if (raw == null) return const [];
+    final j = tryJsonDecode(raw);
+    if (j is! Map) return const [];
+    final out = <_SubAgentRow>[];
+    final results = j['results'];
+    if (results is List) {
+      for (final e in results) {
+        if (e is! Map) continue;
+        out.add(
+          _SubAgentRow(
+            label: asStr(e['agent']),
+            ok: e['ok'] == true,
+            detail: _detail(asMap(e)),
+            text: asStr(e['output']),
+          ),
+        );
+      }
+    }
+    final turns = j['turns'];
+    if (turns is List) {
+      for (final e in turns) {
+        if (e is! Map) continue;
+        out.add(
+          _SubAgentRow(
+            label: '${t('第', 'Round')} ${e['round']} · ${asStr(e['agent'])}',
+            ok: e['ok'] == true,
+            detail: _detail(asMap(e)),
+            text: asStr(e['output']),
+          ),
+        );
+      }
+    }
+    return out;
+  }
+
+  String _detail(Map<String, dynamic> e) {
+    final steps = e['steps'];
+    final n = steps is List ? steps.length : 0;
+    final ms = e['ms'] is num ? (e['ms'] as num).toInt() : 0;
+    final tokens = e['tokens'];
+    var tok = 0;
+    if (tokens is Map) {
+      final i = tokens['input'];
+      final o = tokens['output'];
+      tok = (i is num ? i.toInt() : 0) + (o is num ? o.toInt() : 0);
+    }
+    final bits = <String>[
+      if (n > 0) '$n ${t('步', 'steps')}',
+      if (tok > 0) formatTokens(tok),
+      if (ms > 0) '${(ms / 1000).toStringAsFixed(1)}s',
+    ];
+    return bits.join(' · ');
+  }
+}
+
+class _SubAgentRow {
+  const _SubAgentRow({required this.label, required this.ok, required this.detail, required this.text});
+  final String label;
+  final bool ok;
+  final String detail;
+  final String text;
 }

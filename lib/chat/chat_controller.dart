@@ -569,14 +569,43 @@ class ChatController extends ChangeNotifier {
         onUpdate(List.unmodifiable(acc.parts));
       }
       final current = acc.parts[idx] as ToolPart;
-      // 分派工具要等子智能体跑完，3 分钟明显不够；其余工具维持原来的上限。
-      final limit = tool.name == 'dispatch_subagents' ? const Duration(minutes: 10) : const Duration(minutes: 3);
+      // 分派/讨论要等子智能体跑完，3 分钟明显不够；其余工具维持原来的上限。
+      final async = tool.name == 'dispatch_subagents' || tool.name == 'discuss_subagents';
+      final limit = async ? const Duration(minutes: 15) : const Duration(minutes: 3);
+      // 子智能体的过程行写进 ToolPart.meta.progress：还在跑的时候界面就能看到它在干什么。
+      final progress = <String>[];
+      void pushProgress(String line) {
+        if (progress.length >= 12) return;
+        progress.add(line);
+        final i = acc.parts.indexWhere((p) => p is ToolPart && p.callId == call.callId);
+        if (i < 0) return;
+        final tp = acc.parts[i] as ToolPart;
+        acc.parts[i] = tp.copyWith(meta: {...?tp.meta, 'progress': List<String>.of(progress)});
+        onUpdate(List.unmodifiable(acc.parts));
+      }
+
+      final callCtx = ToolRunContext(
+        settings: runCtx.settings,
+        provider: runCtx.provider,
+        model: runCtx.model,
+        tools: runCtx.tools,
+        cancel: runCtx.cancel,
+        depth: runCtx.depth,
+        onProgress: pushProgress,
+      );
       try {
-        final out = await runWithToolContext(runCtx, () => tool.execute(current.inputJson)).timeout(limit);
+        final out = await runWithToolContext(callCtx, () => tool.execute(current.inputJson)).timeout(limit);
         final decoded = call.name == 'plot_cartesian' || call.name == 'plot_spatial' ? tryJsonDecode(out) : null;
-        acc.parts[idx] = current.copyWith(output: out, isError: decoded is Map && decoded.containsKey('error'));
+        // 执行途中 pushProgress 改过这个 part，重新取一次，别把 meta 覆盖掉。
+        acc.parts[idx] = (acc.parts[idx] as ToolPart).copyWith(
+          output: out,
+          isError: decoded is Map && decoded.containsKey('error'),
+        );
       } catch (e) {
-        acc.parts[idx] = current.copyWith(output: jsonEncode({'error': e.toString()}), isError: true);
+        acc.parts[idx] = (acc.parts[idx] as ToolPart).copyWith(
+          output: jsonEncode({'error': e.toString()}),
+          isError: true,
+        );
       }
       onUpdate(List.unmodifiable(acc.parts));
     }

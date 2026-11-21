@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mewhub/agents/sub_agent.dart';
+import 'package:mewhub/agents/sub_agent_tools.dart';
 
 void main() {
   test('子智能体 JSON 往返不丢字段', () {
@@ -79,5 +80,33 @@ void main() {
     expect(SubAgent(name: '  ').usable, isFalse);
     expect(SubAgent(name: 'x', enabled: false).usable, isFalse);
     expect(SubAgent(name: 'x').usable, isTrue);
+  });
+
+  test('分派与讨论两个工具都注册，必填项对得上', () {
+    final tools = buildSubAgentTools(
+      agents: [
+        SubAgent(name: '甲'),
+        SubAgent(name: '乙', enabled: false),
+      ],
+    );
+    expect([for (final t in tools) t.name], ['dispatch_subagents', 'discuss_subagents']);
+    expect(tools.first.parameters['required'], containsAll(['tool_title', 'assignments']));
+    expect(tools.last.parameters['required'], contains('topic'));
+  });
+
+  test('没有可用子智能体时一个工具都不注册', () {
+    expect(buildSubAgentTools(agents: [SubAgent(name: ' ')]), isEmpty);
+    expect(buildSubAgentTools(agents: [SubAgent(name: 'x', enabled: false)]), isEmpty);
+  });
+
+  test('不在对话生成过程中调用，返回明确错误而不是崩', () async {
+    final tools = buildSubAgentTools(agents: [SubAgent(name: '甲')]);
+    final out = await tools.first.execute({
+      'tool_title': '看一下',
+      'assignments': [
+        {'agent': '甲', 'task': '查 300274 日线'},
+      ],
+    });
+    expect(out, contains('只能在一次对话生成过程中使用'));
   });
 }
