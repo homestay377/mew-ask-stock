@@ -35,9 +35,15 @@ final out = await runWithToolContext(runCtx, () => tool.execute(args)).timeout(l
 - 并行是在 Dart 层面 `Future.wait`，同时打同一个供应商的多个请求；供应商限流时会被自己的错误处理接住，不会影响其他任务。
 - 子智能体的 token 用量记在结果的 `tokens` 里，**不进** 主对话的用量统计（还没做归集）。
 
-## 还没做（P2/P3）
+## 还没做（P3）
 
-- `discuss_subagents`：多轮讨论
-- 过程实时可见（`ToolRunContext.onProgress` 已经留好口子，界面上还没消费）
-- trace 卡片：可折叠的步骤、耗时、token
 - 子智能体之间互相提问（协作工具）
+- trace 的展开态：现在能一眼看到每个子智能体的步数/耗时/token 和结论开头，但看不到逐条工具调用的细节（`steps` 里其实有，只是界面没铺开）
+- 流程上仍是一层：子智能体拿不到 `dispatch_subagents`
+
+## P2 补的东西
+
+- `discuss_subagents`：最多 4 个参与者、1–5 轮，串行发言，每轮都能看到此前所有发言；分歧比结论更有用。
+- 过程实时可见：`ToolRunContext.onProgress` 的每一行写进 `ToolPart.meta.progress`，界面在工具还没返回时就能看到「谁开工了、谁完成了」。
+- `ToolCard` 对这两个工具显示摘要行（ok/失败、步数、耗时、token、结论开头），完整 JSON 仍在展开区。
+- 分派与讨论的等待上限都是 15 分钟（普通工具 3 分钟）。
