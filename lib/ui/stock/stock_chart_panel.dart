@@ -507,7 +507,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
       if (stale) {
         final err = _refreshError;
         final aged = age == null ? '上次的缓存' : '${humanAge(age)}的缓存';
-        return err == null ? '显示的是${aged}，正在后台刷新' : '刷新失败（${err}），显示的是${aged}';
+        return err == null ? '显示的是$aged，正在后台刷新' : '刷新失败（$err），显示的是$aged';
       }
     }
     return null;
@@ -817,7 +817,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
       return _ChanHit(
         '中枢 ${box.tag}',
         '${box.tag}[${box.s}-${box.e}]，ZG=${box.zg.toStringAsFixed(2)}，ZD=${box.zd.toStringAsFixed(2)}，'
-            '这一根在${seg}',
+            '这一根在$seg',
       );
     }
 

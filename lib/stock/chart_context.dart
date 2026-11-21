@@ -278,12 +278,12 @@ class ChartContext {
         false => '还没走完',
         null => '收盘状态未知',
       };
-      b.writeln('复权口径：$adjust；最后一根$closeText${dataAge == null ? '' : '（${dataAge}）'}');
+      b.writeln('复权口径：$adjust；最后一根$closeText${dataAge == null ? '' : '（$dataAge）'}');
     }
     if (fromCache) {
       b.writeln(
-        '⚠ 当前显示的是缓存数据${cacheAge == null ? '' : '（${cacheAge}写入）'}，不是刚拉的'
-        '${refreshError == null ? '' : '；后台刷新失败：${refreshError}'}',
+        '⚠ 当前显示的是缓存数据${cacheAge == null ? '' : '（$cacheAge写入）'}，不是刚拉的'
+        '${refreshError == null ? '' : '；后台刷新失败：$refreshError'}',
       );
     }
     for (final issue in qualityIssues) {
