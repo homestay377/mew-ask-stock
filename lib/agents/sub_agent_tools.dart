@@ -99,6 +99,7 @@ ${subAgentCatalog(agents)}''',
           depth: ctx.depth + 1,
           onProgress: ctx.onProgress,
         ),
+        peers: agents,
       );
 
       final results = <SubAgentResult>[];
@@ -185,6 +186,7 @@ AppTool _discussTool(List<SubAgent> agents) {
           depth: ctx.depth + 1,
           onProgress: ctx.onProgress,
         ),
+        peers: agents,
       );
       final turns = await runner.discuss(chosen, topic, rounds: rounds);
       return jsonEncode({

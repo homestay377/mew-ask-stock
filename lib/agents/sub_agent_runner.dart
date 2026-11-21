@@ -5,6 +5,7 @@ import '../ai/message.dart';
 import '../ai/provider.dart';
 import '../ai/provider_config.dart';
 import '../chat/accumulator.dart';
+import '../core/util.dart';
 import '../tools/tool.dart';
 import 'sub_agent.dart';
 import 'tool_run_context.dart';
@@ -76,15 +77,21 @@ String _clip(String s, int max) => s.length <= max ? s : '${s.substring(0, max)}
 /// 和参考实现（ds7891/- 的 Kotlin 版）的关系：结构与预算一致，代码是按
 /// MewHub 的 Dart 接口重写的，不是移植。
 class SubAgentRunner {
-  SubAgentRunner(this.ctx);
+  SubAgentRunner(this.ctx, {this.peers = const []});
 
   final ToolRunContext ctx;
+
+  /// 同批的其他子智能体，供 `ask_peer` 互相提问。
+  final List<SubAgent> peers;
 
   /// 单个任务最多几轮工具来回。
   static const maxSteps = 24;
 
-  /// 子智能体不能再派子智能体，深度直接卡在 1 层。
-  static const maxDepth = 1;
+  /// 主控 0 → 子智能体 1 → 它问的同伴 2。再深就停，避免互相问个没完。
+  static const maxDepth = 2;
+
+  /// 一个子智能体最多问几次同伴。
+  static const maxPeerQuestions = 3;
 
   static const _toolTimeout = Duration(minutes: 3);
   static const _stepOutputLimit = 4000;
@@ -96,7 +103,7 @@ class SubAgentRunner {
     if (text.isEmpty) {
       return SubAgentResult(agent: agent.name, task: task, output: '', error: '任务描述为空', elapsedMs: 0);
     }
-    if (ctx.depth >= maxDepth) {
+    if (ctx.depth > maxDepth) {
       return SubAgentResult(
         agent: agent.name,
         task: text,
@@ -118,7 +125,12 @@ class SubAgentRunner {
       );
     }
 
-    final tools = _toolsFor(agent);
+    var peerBudget = maxPeerQuestions;
+    final tools = _toolsFor(
+      agent,
+      allowPeers: ctx.depth < maxDepth,
+      onPeerBudget: () => peerBudget > 0 ? (peerBudget -= 1) >= 0 : false,
+    );
     final usable = model.tools ? tools : const <AppTool>[];
     final ai = providerFor(provider);
     final msgs = <ChatMessage>[
@@ -188,7 +200,7 @@ class SubAgentRunner {
             ms: sw.elapsedMilliseconds,
           ),
         );
-        ctx.onProgress?.call('${agent.name} · ${call.name}');
+        ctx.onProgress?.call('${agent.name} · ${call.name}${_argHint(call)}');
       }
       msgs.add(ChatMessage(role: Role.assistant, parts: round.parts));
     }
@@ -258,9 +270,9 @@ class SubAgentRunner {
     return (provider: ctx.provider, model: ctx.model);
   }
 
-  List<AppTool> _toolsFor(SubAgent agent) {
+  List<AppTool> _toolsFor(SubAgent agent, {bool allowPeers = false, bool Function()? onPeerBudget}) {
     // 子智能体永远不会拿到分派工具本身：一层就够，避免无限套娃。
-    var list = ctx.tools.where((t) => t.name != 'dispatch_subagents').toList();
+    var list = ctx.tools.where((t) => t.name != 'dispatch_subagents' && t.name != 'ask_peer').toList();
     if (agent.toolNames.isNotEmpty) {
       final allow = agent.toolNames.toSet();
       list = list.where((t) => allow.contains(t.name)).toList();
@@ -268,7 +280,57 @@ class SubAgentRunner {
     if (agent.readOnly) {
       list = list.where((t) => !readOnlyBlockedTools.contains(t.name)).toList();
     }
+    if (allowPeers && onPeerBudget != null) {
+      final others = peers.where((p) => p.usable && p.id != agent.id).toList();
+      if (others.isNotEmpty) list = [...list, _askPeerTool(agent, others, onPeerBudget)];
+    }
     return list;
+  }
+
+  /// 子智能体之间互相提问：把问题转给同批的另一个子智能体，拿回它的回答。
+  /// 只用几轮、只允许问配置里存在的同伴，且不会继续传给第三层（深度卡死）。
+  AppTool _askPeerTool(SubAgent self, List<SubAgent> others, bool Function() take) {
+    final names = [for (final o in others) o.name];
+    return AppTool(
+      name: 'ask_peer',
+      displayName: '问同伴',
+      description:
+          '向同批的另一个子智能体提问，拿到它的判断。适合你不确定或需要另一视角时，'
+          '例如让「结构审查」确认某个买卖点是否成立。可用对象：${names.join('、')}。'
+          '对方也是只读/白名单受限的，不要指望它替你改图。',
+      parameters: objectSchema(
+        {'agent': strProp('要问谁，必须是：${names.join('、')}'), 'question': strProp('问题本身，写清楚要它判断什么、上下文是什么')},
+        required: ['agent', 'question'],
+      ),
+      execute: (args) async {
+        final name = asStr(args['agent']).trim();
+        final q = asStr(args['question']).trim();
+        if (q.isEmpty) return jsonEncode({'error': '问题为空'});
+        SubAgent? peer;
+        for (final o in others) {
+          if (o.name == name) {
+            peer = o;
+            break;
+          }
+        }
+        if (peer == null) return jsonEncode({'error': '没有这个同伴', 'available': names});
+        if (!take()) return jsonEncode({'error': '这一轮问同伴的次数用完了（上限 $maxPeerQuestions 次）'});
+        final child = SubAgentRunner(
+          ToolRunContext(
+            settings: ctx.settings,
+            provider: ctx.provider,
+            model: ctx.model,
+            tools: ctx.tools,
+            cancel: ctx.cancel,
+            depth: ctx.depth + 1,
+            onProgress: ctx.onProgress,
+          ),
+          peers: peers,
+        );
+        final r = await child.run(peer, q, extraContext: '提问者：${self.name}');
+        return jsonEncode({'agent': peer.name, 'ok': r.ok, 'output': r.output, if (r.error != null) 'error': r.error});
+      },
+    );
   }
 
   String _systemPrompt(SubAgent agent, List<AppTool> tools) {
@@ -288,6 +350,19 @@ class SubAgentRunner {
     }
     b.writeln('- 完成后用中文给出简明结论：做了什么、结论是什么、还有什么没做。不要复述工具原文。');
     return b.toString().trimRight();
+  }
+
+  /// 给进度行用的参数摘要：只取最能说明「在查什么」的几个值。
+  static String _argHint(ToolPart call) {
+    final args = call.inputJson;
+    for (final k in const ['symbol', 'code', 'periods', 'period', 'query', 'url', 'task', 'agent', 'topic']) {
+      final v = args[k];
+      if (v == null) continue;
+      final s = v is List ? v.join('/') : '$v';
+      final t = s.length > 42 ? '${s.substring(0, 42)}…' : s;
+      return '($t)';
+    }
+    return '';
   }
 
   static String _textOf(List<Part> parts) {
