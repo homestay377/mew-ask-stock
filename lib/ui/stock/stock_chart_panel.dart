@@ -72,6 +72,20 @@ class StockPanelState extends ChangeNotifier {
   String _period;
   bool _expanded = false;
 
+  /// 面板高度（逻辑像素）。null = 用默认高度（屏幕的 54%，上限 380）。
+  /// 用户拖过顶部把手之后才有值，之后跨会话记住。
+  double? _height;
+  double? get height => _height;
+
+  /// 拖拽调高度。范围由调用方给，这里只做兜底夹取。
+  void setHeight(double v, {double min = 160, double max = 900}) {
+    final h = v.clamp(min, max);
+    if (_height != null && (_height! - h).abs() < 0.5) return;
+    _height = h;
+    notifyListeners();
+    unawaited(_persist());
+  }
+
   /// 主图指标开关。MA 默认开。
   final Map<String, bool> mainOn = {'MA': true, 'BOLL': false, 'CHAN': true, 'HOLLOW': false};
 
@@ -140,7 +154,12 @@ class StockPanelState extends ChangeNotifier {
       final f = File('${AppPaths.support.path}/stock_panel.json');
       await f.parent.create(recursive: true);
       await f.writeAsString(
-        jsonEncode({'symbol': _symbol, 'period': _period, if (_name != null) 'name': _name}),
+        jsonEncode({
+          'symbol': _symbol,
+          'period': _period,
+          if (_name != null) 'name': _name,
+          if (_height != null) 'height': _height,
+        }),
         flush: true,
       );
     } catch (_) {}
@@ -162,6 +181,12 @@ class StockPanelState extends ChangeNotifier {
       // 文件可能被改坏或来自旧版本：只接受已知周期，否则保持默认
       if (per != null && _periodLabels.containsKey(per)) _period = per;
       if (nm != null && nm.isNotEmpty) _name = nm;
+      // 高度只接受合理区间：文件被改坏时不要把面板撑成 0 或整屏
+      final h = j['height'];
+      if (h is num && h.isFinite) {
+        final v = h.toDouble();
+        if (v >= 160 && v <= 2000) _height = v;
+      }
       notifyListeners();
     } catch (_) {
       // 记录损坏就用默认值
@@ -415,7 +440,11 @@ class _StockChartPanelState extends State<StockChartPanel> {
       return _CollapsedBar(state: widget.state, onTap: widget.state.expand);
     }
 
-    final height = math.min(widget.maxHeight, MediaQuery.sizeOf(context).height * 0.54);
+    final screenH = MediaQuery.sizeOf(context).height;
+    final defaultH = math.min(widget.maxHeight, screenH * 0.54);
+    // 上限留出一截给输入框和消息区，别让 K 线把整个对话页吃掉
+    final maxH = screenH * 0.78;
+    final height = (widget.state.height ?? defaultH).clamp(160.0, maxH);
 
     return Container(
       height: height,
@@ -430,6 +459,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
         children: [
           Column(
             children: [
+              _PanelDragHandle(onDrag: (dy) => widget.state.setHeight(height - dy, min: 160, max: maxH)),
               _PeriodRow(
                 state: widget.state,
                 onCollapse: widget.state.collapse,
@@ -999,6 +1029,38 @@ class _CollapsedBar extends StatelessWidget {
   }
 }
 
+/// 面板顶部的拖拽把手：往上拖变高，往下拖变矮。
+///
+/// 高度只在拖动过程中修改，松手时 `StockPanelState.setHeight` 已经把值记下了，
+/// 不需要额外的 onDragEnd。
+class _PanelDragHandle extends StatelessWidget {
+  const _PanelDragHandle({required this.onDrag});
+
+  final void Function(double dy) onDrag;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onVerticalDragUpdate: (d) => onDrag(d.delta.dy),
+      child: SizedBox(
+        height: 13,
+        child: Center(
+          child: Container(
+            width: 38,
+            height: 3.5,
+            decoration: BoxDecoration(
+              color: scheme.onSurfaceVariant.withValues(alpha: 0.32),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 焦点 K 线上挂着的缠论结构（用于「问结构」按钮）。
 class _ChanHit {
   const _ChanHit(this.kind, this.detail);
@@ -1417,6 +1479,47 @@ class _MinutePainter extends CustomPainter {
         path.lineTo(x, y);
       }
     }
+    // 均价线：口径与「该不该画」都由 MinuteSeries 决定
+    // （A 股口径是累计成交额 / 累计成交量；指数不画，量纲不对不硬算）
+    final avg = series.avgPriceSeries() ?? const <double?>[];
+    final avgPath = Path();
+    var avgStarted = false;
+    for (var i = 0; i < avg.length; i++) {
+      final a = avg[i];
+      if (a == null) {
+        avgStarted = false;
+        continue;
+      }
+      final x = xOf(i);
+      final y = yOf(a);
+      if (avgStarted) {
+        avgPath.lineTo(x, y);
+      } else {
+        avgPath.moveTo(x, y);
+        avgStarted = true;
+      }
+    }
+    canvas.drawPath(
+      avgPath,
+      Paint()
+        ..color = const Color(0xFFF0A020)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0,
+    );
+
+    // 均价只画线不够，标一个数字：黄线在盘中和现价经常被看混
+    final lastAvg = avg.isEmpty ? null : avg.last;
+    if (lastAvg != null) {
+      final tp = TextPainter(
+        text: TextSpan(
+          text: '均价 ${lastAvg.toStringAsFixed(2)}',
+          style: const TextStyle(color: Color(0xFFF0A020), fontSize: 8.5),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(padLeft + 2, padTop + 1));
+    }
+
     final lineColor = series.lastPrice >= prev ? up : down;
     canvas.drawPath(
       path,

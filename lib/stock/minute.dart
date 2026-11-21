@@ -50,6 +50,28 @@ class MinuteSeries {
   /// 当前涨跌幅（相对昨收）。
   double get changePct => prevClose == 0 ? 0 : (lastPrice - prevClose) / prevClose * 100;
 
+  /// 指数类标的（沪深指数、中证指数）。分时的 amount 是成分股成交额，
+  /// 和指数点位没有关系，算不出「每股均价」。
+  bool get isIndexLike => symbol.startsWith('sh000') || symbol.startsWith('sz399') || symbol.startsWith('sh950');
+
+  /// 分时均价线（A 股口径：累计成交额 / 累计成交量，volume 是「手」）。
+  ///
+  /// 返回 null 表示**不该画这条线**：
+  ///  - 指数：没有「每股均价」概念，画出来会是 14 这种荒唐数字
+  ///  - 首点均价就偏离首点价格 10% 以上：说明量纲不是「手 + 元」，不硬算
+  ///
+  /// 逐点 null 表示该分钟没有成交（成交量没动），画线时断开即可。
+  List<double?>? avgPriceSeries() {
+    if (isIndexLike) return null;
+    final out = <double?>[for (final p in points) (p.volume > 0 && p.amount > 0) ? p.amount / (p.volume * 100) : null];
+    final i = out.indexWhere((v) => v != null);
+    if (i >= 0 && points[i].price > 0) {
+      final dev = (out[i]! - points[i].price).abs() / points[i].price;
+      if (dev > 0.1) return null;
+    }
+    return out;
+  }
+
   /// 全天最大偏离幅度，用于纵轴对称。
   double maxDeviation() {
     var m = 0.0;
