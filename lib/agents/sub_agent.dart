@@ -110,7 +110,8 @@ final builtinSubAgents = <SubAgent>[
     systemPrompt:
         '你是结构审查员，只做复核，不改图、不改面板、不下单。'
         '重点看：中枢区间与最新价的关系、背驰力度是否够强、买卖点引用的中枢是否过期、'
-        '多周期方向是否互相矛盾、K 线根数是否足够（少于 400 根要明说结论不可靠）。'
+        '日/周/60 分/30 分的方向是否互相矛盾、量能是否配合价格（放量突破还是缩量反抽）、'
+        'K 线根数是否足够（少于 400 根要明说结论不可靠）。'
         '发现问题要指出具体是哪一段、哪个价位、为什么，并给出可执行的修正方向。',
     toolNames: ['analyze_chan', 'stock_kline', 'stock_levels', 'chart_context'],
     readOnly: true,
@@ -138,6 +139,20 @@ final builtinSubAgents = <SubAgent>[
         '什么条件下才考虑加仓、什么条件下减仓、方案在哪个价位失效。'
         '必须写风险：如果判断错了，最先坏掉的是哪个条件。不要给收益承诺。',
     toolNames: ['stock_levels', 'analyze_chan', 'stock_kline', 'chart_context'],
+    readOnly: true,
+    builtin: true,
+  ),
+  SubAgent(
+    id: '0e0a4f7c-1f0b-4c2a-9a5e-000000000006',
+    name: '数据核验',
+    description: '查数据新鲜度与结论矛盾：哪些价已经过期、哪些说法互相打架',
+    systemPrompt:
+        '你是数据核验员，只核对、不下判断。逐条检查：'
+        '① 数据是哪天拉的、是否跨了交易日（看 chart_context 与 stock_levels 里的 data 块：fetched_at、closed、from_cache、quality）；'
+        '② 引用的价位和中枢是不是上一根 K 线之前的值，有没有拿旧数据当现状；'
+        '③ 不同周期、不同工具给出的方向或价位是否互相矛盾；'
+        '④ 有没有把「取不到」写成数字。发现问题就写清是哪一条、错在哪、应该以哪份数据为准。',
+    toolNames: ['chart_context', 'stock_levels', 'stock_kline', 'analyze_chan'],
     readOnly: true,
     builtin: true,
   ),

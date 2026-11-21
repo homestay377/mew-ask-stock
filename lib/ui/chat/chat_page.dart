@@ -28,6 +28,7 @@ import 'chat_quick_sheets.dart';
 import 'chat_usage_sheet.dart';
 import 'composer.dart';
 import 'message_bubble.dart';
+import 'sub_agent_sheet.dart';
 import 'model_picker.dart';
 
 /// The follow motion keeps the same retargeted curve while reaching the new
@@ -687,6 +688,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         ),
       ),
       actions: [
+        IconButton(
+          tooltip: t('智能体团队', 'Agent team'),
+          icon: const Icon(Icons.groups_2_outlined),
+          onPressed: () => showSubAgentTeamSheet(
+            context,
+            liveParts: () => [for (final n in c.conversation.nodes) ...n.current.parts],
+          ),
+        ),
         IconButton(
           tooltip: t('新对话', 'New chat'),
           icon: const Icon(Icons.edit_square),
