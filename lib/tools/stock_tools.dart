@@ -607,7 +607,9 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           '  · 提到「中枢 ZG=71.74 ZD=62.24」→ rect 把区间框出来\n'
           '  · 提到「这个下跌笔要跌破 X 才失效」→ arrow 从当前价指向 X\n'
           '  · 提到「三买出现在某根」→ dot 标在那根上\n'
-          '多次调用会累加，不会覆盖。',
+          '多次调用会累加，不会覆盖。\n'
+          '画线按「这一根 K 线」作锚点：跨交易日（分钟线是走完新的一根）会自动清空，'
+          '因为滚动窗口会让旧线的索引位移。所以不要说「这条线会一直留着」。',
       parameters: objectSchema(
         {
           'symbol': strProp('股票代码。不传则画在面板当前标的上'),
@@ -653,7 +655,15 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           // 用真实 K 线确定有效索引范围，越界的坐标直接拒绝（避免画出乱线）
           final series = await source.kline(symbol, period: period);
           final total = series.bars.length;
-          final existing = await ShapeStore.instance.load(series.symbol, period);
+          // 读的时候把「这组线属于哪一天」一起带上：跨日会整组作废
+          final barDate = barDateOf(series.last.t);
+          final existing = await ShapeStore.instance.load(
+            series.symbol,
+            period,
+            currentBarDate: barDate,
+            currentStamp: series.last.t,
+            intraday: minutesOfPeriod(period) != null,
+          );
 
           int resolveIndex(Object? v, int fallback) {
             if (v is! num) return fallback;
@@ -708,7 +718,7 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           }
 
           final next = [...existing, ...added];
-          await ShapeStore.instance.save(series.symbol, period, next);
+          await ShapeStore.instance.save(series.symbol, period, next, barDate: barDate, barStamp: series.last.t);
 
           // 如果画的正是面板当前那一屏，让它立刻重读，用户不用手动刷新
           if (stockPanelRequest.currentSymbol == series.symbol &&

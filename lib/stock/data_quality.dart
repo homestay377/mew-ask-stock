@@ -289,6 +289,14 @@ String humanAge(Duration d) {
   return '${d.inDays} 天前';
 }
 
+/// 取时间戳的日期部分（`yyyy-MM-dd`）；解析不出来返回 null。
+/// 画线按天失效、缓存按天判断都用它，保证全工程只有一种「哪一天」的写法。
+String? barDateOf(String t) {
+  final d = parseBarTime(t);
+  if (d == null) return null;
+  return '${d.year}-${_p2(d.month)}-${_p2(d.day)}';
+}
+
 /// 把原始时间戳转成给人看的写法：日/周/月只到日，分钟到分钟。
 ///
 /// 腾讯分钟线的原始值是 `202611201500`，直接塞进摘要里没法读，

@@ -398,7 +398,13 @@ class _StockChartPanelState extends State<StockChartPanel> {
       }
       if (!mounted || _lastKey != key) return;
       _viewport.reset(s.bars.length);
-      final shapes = await ShapeStore.instance.load(widget.state.symbol, widget.state.period);
+      final shapes = await ShapeStore.instance.load(
+        s.symbol,
+        s.period,
+        currentBarDate: barDateOf(s.last.t),
+        currentStamp: s.last.t,
+        intraday: minutesOfPeriod(s.period) != null,
+      );
       if (!mounted || _lastKey != key) return;
       setState(() {
         _series = s;
@@ -465,6 +471,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
                 onCollapse: widget.state.collapse,
                 onAskBar: _canAsk ? _askAboutFocus : null,
                 onAskStructure: (_canAsk && _chanHitAt(_focusIdx) != null) ? _askAboutStructure : null,
+                onClearShapes: _shapes.isEmpty ? null : _clearShapes,
                 onSearch: _openSearch,
                 onAddToWatch: _addCurrentToWatch,
                 onWatchlist: () => setState(() => _drawerOpen = !_drawerOpen),
@@ -510,6 +517,24 @@ class _StockChartPanelState extends State<StockChartPanel> {
       _refreshError = null;
       _chan = ch;
     });
+  }
+
+  /// 一键擦除当前这张图的画线（只擦「这条代码 + 这个周期」那一组）。
+  ///
+  /// 不做二次确认：AI 画的东西本来就是可再生的，多一步弹窗反而碍事。
+  Future<void> _clearShapes() async {
+    final s = _series;
+    final symbol = s?.symbol ?? widget.state.symbol;
+    final period = widget.state.period;
+    await ShapeStore.instance.clear(symbol, period);
+    if (!mounted) return;
+    setState(() => _shapes = const []);
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(
+        content: Text('已清除 $symbol ${_periodLabels[period] ?? period} 图的画线'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   /// 数据提示条要说的那句话。没有可说的就返回 null（整条不占位）。
@@ -733,7 +758,14 @@ class _StockChartPanelState extends State<StockChartPanel> {
   Future<void> _reloadShapesSilently() async {
     // 收起状态下不重载：省一次读盘和重建
     if (!mounted || !widget.state.expanded) return;
-    final shapes = await ShapeStore.instance.load(widget.state.symbol, widget.state.period);
+    final s = _series;
+    final shapes = await ShapeStore.instance.load(
+      s?.symbol ?? widget.state.symbol,
+      widget.state.period,
+      currentBarDate: s == null || s.bars.isEmpty ? null : barDateOf(s.last.t),
+      currentStamp: s == null || s.bars.isEmpty ? null : s.last.t,
+      intraday: minutesOfPeriod(widget.state.period) != null,
+    );
     if (!mounted) return;
     setState(() => _shapes = shapes);
   }
@@ -1079,6 +1111,7 @@ class _PeriodRow extends StatelessWidget {
     required this.onCollapse,
     this.onAskBar,
     this.onAskStructure,
+    this.onClearShapes,
     this.onSearch,
     this.onAddToWatch,
     this.onWatchlist,
@@ -1093,6 +1126,9 @@ class _PeriodRow extends StatelessWidget {
 
   /// 非空时显示「问结构」按钮（选中的那根落在笔/中枢/买卖点上才出现）。
   final VoidCallback? onAskStructure;
+
+  /// 非空时显示「擦除画线」按钮（当前这张图有画线时才出现）。
+  final VoidCallback? onClearShapes;
 
   /// 右上角搜索。
   final VoidCallback? onSearch;
@@ -1173,6 +1209,14 @@ class _PeriodRow extends StatelessWidget {
                     Text('问这根', style: TextStyle(fontSize: 11, color: scheme.primary)),
                   ],
                 ),
+              ),
+            ),
+          if (onClearShapes != null)
+            InkWell(
+              onTap: onClearShapes,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                child: Icon(Icons.layers_clear_rounded, size: 17, color: scheme.onSurfaceVariant),
               ),
             ),
           if (onAddToWatch != null)
