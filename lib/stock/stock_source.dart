@@ -512,8 +512,6 @@ class StockSource {
       return (v == null || v == 0) ? null : v;
     }
 
-    double? at(int i) => i < f.length ? _d(f[i]) : null;
-
     return Quote(
       symbol: code,
       name: f[1],
@@ -834,8 +832,6 @@ class StockSource {
     };
     return '${code.substring(2)}.$suffix';
   }
-
-  static String _emSecid(String code) => '${code.startsWith('sh') ? '1' : '0'}.${code.substring(2)}';
 
   /// 取一只股票的估值、财报、龙虎榜。
   ///
