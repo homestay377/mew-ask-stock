@@ -20,6 +20,25 @@ import 'chat_edit_resend_test.dart' show MemoryDatabase;
 
 class _LoopbackHttpOverrides extends HttpOverrides {}
 
+/// 删测试临时目录，容忍后台还在写。
+///
+/// MCP 客户端断开后仍可能补写状态文件，`delete(recursive: true)` 会撞上
+/// 「Directory not empty」——这是清理竞态，不该让被测行为背锅。
+Future<void> _deleteQuietly(Directory dir) async {
+  for (var i = 0; i < 6; i++) {
+    try {
+      if (!await dir.exists()) return;
+      await dir.delete(recursive: true);
+      return;
+    } catch (_) {
+      await Future<void>.delayed(Duration(milliseconds: 50 * (i + 1)));
+    }
+  }
+  try {
+    await dir.delete(recursive: true);
+  } catch (_) {}
+}
+
 /// Tiny Streamable HTTP MCP server. Replies over SSE and sends a server
 /// request with a colliding id first, like some real servers do.
 class _FakeMcpServer {
@@ -271,7 +290,7 @@ void main() {
         await server.close(force: true);
         await store.flush();
         store.dispose();
-        await temp.delete(recursive: true);
+        await _deleteQuietly(temp);
       }
     });
   });
