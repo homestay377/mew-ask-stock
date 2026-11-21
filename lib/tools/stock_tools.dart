@@ -130,7 +130,7 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           final bars = s.bars.length > 30 ? s.bars.sublist(s.bars.length - 30) : s.bars;
 
           final closes = s.bars.map((b) => b.c).toList();
-          double maOf(int n) {
+          double? maOf(int n) {
             // 数据不足返回 null：NaN 会让 jsonEncode 抛异常，整个工具挂掉
             if (closes.length < n) return null;
             final seg = closes.sublist(closes.length - n);
@@ -144,10 +144,10 @@ List<AppTool> buildStockTools({bool enabled = true}) {
             'total_bars': s.length,
             'first_date': s.first.t,
             'last_date': s.last.t,
-            'ma5': maOf(5),
-            'ma10': maOf(10),
-            'ma20': maOf(20),
-            'ma60': maOf(60),
+            'ma5': r2(maOf(5)),
+            'ma10': r2(maOf(10)),
+            'ma20': r2(maOf(20)),
+            'ma60': r2(maOf(60)),
             'bars': [
               for (final b in bars) {'t': b.t, 'o': b.o, 'h': b.h, 'l': b.l, 'c': b.c, 'v': b.v},
             ],
