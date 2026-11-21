@@ -4,6 +4,9 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../agents/sub_agent_store.dart';
+import '../agents/sub_agent_tools.dart';
+import '../agents/tool_run_context.dart';
 import '../ai/factory.dart';
 import '../ai/message.dart';
 import '../ai/provider.dart';
@@ -253,6 +256,8 @@ class ChatController extends ChangeNotifier {
       if (a.enableMemory) ...buildMemoryTools(db, assistantId: a.useGlobalMemory ? null : a.id),
       // 股票分析：数据由 App 自己直取，不依赖任何界面状态。
       ...buildStockTools(enabled: a.enableStockTools),
+      // 子智能体分派：配置为空时返回空列表，模型就看不到这个工具。
+      ...buildSubAgentTools(agents: await SubAgentStore.load()),
     ];
     final servers = [
       for (final m in s.mcpServers)
@@ -386,6 +391,9 @@ class ChatController extends ChangeNotifier {
     final ai = providerFor(provider);
     final tools = model.tools ? await _collectTools(model) : <AppTool>[];
     final toolMap = {for (final t in tools) t.name: t};
+    // 工具只收到参数，看不到模型与会话；用 Zone 注入这一份上下文，
+    // 分派类工具（子智能体）靠它拿到当前模型、工具表和取消令牌。
+    final runCtx = ToolRunContext(settings: settings, provider: provider, model: model, tools: tools, cancel: cancel);
     final memories = a.enableMemory
         ? await memoriesForPrompt(db, assistantId: a.useGlobalMemory ? null : a.id)
         : <MemoryItem>[];
@@ -447,7 +455,7 @@ class ChatController extends ChangeNotifier {
         }
         final pending = acc.pendingTools;
         if (pending.isEmpty || cancel.isCancelled) break;
-        await _runTools(pending, toolMap, acc, a, cancel, (parts) {
+        await _runTools(pending, toolMap, acc, a, cancel, runCtx, (parts) {
           if (!live()) return;
           msg = msg.copyWith(parts: parts);
           _conv = _conv.upsertMessage(nodeId, msg);
@@ -528,6 +536,7 @@ class ChatController extends ChangeNotifier {
     PartAccumulator acc,
     Assistant a,
     CancelToken cancel,
+    ToolRunContext runCtx,
     void Function(List<Part>) onUpdate,
   ) async {
     for (final call in pending) {
@@ -560,8 +569,13 @@ class ChatController extends ChangeNotifier {
         onUpdate(List.unmodifiable(acc.parts));
       }
       final current = acc.parts[idx] as ToolPart;
+      // 分派工具要等子智能体跑完，3 分钟明显不够；其余工具维持原来的上限。
+      final limit = tool.name == 'dispatch_subagents' ? const Duration(minutes: 10) : const Duration(minutes: 3);
       try {
-        final out = await tool.execute(current.inputJson).timeout(const Duration(minutes: 3));
+        final out = await runWithToolContext(
+          runCtx,
+          () => tool.execute(current.inputJson),
+        ).timeout(limit);
         final decoded = call.name == 'plot_cartesian' || call.name == 'plot_spatial' ? tryJsonDecode(out) : null;
         acc.parts[idx] = current.copyWith(output: out, isError: decoded is Map && decoded.containsKey('error'));
       } catch (e) {
