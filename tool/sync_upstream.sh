@@ -46,6 +46,16 @@ git switch -C "$BRANCH" upstream/main >/dev/null
 echo "== 用我们的树覆盖（上游独有的新文件保持不动）=="
 git checkout main -- .
 
+# Android 的 Kotlin 包目录只能有一份：上游那份（mizaawa/mewhub）留着会和我们的
+# 应用入口打双份，删掉；只保留 main 里有的文件。
+KOTLIN_DIR="android/app/src/main/kotlin"
+if git cat-file -e "main:$KOTLIN_DIR" 2>/dev/null; then
+  while IFS= read -r p; do
+    [[ -z "$p" ]] && continue
+    git cat-file -e "main:$p" 2>/dev/null || rm -f "$p"
+  done <<< "$(git ls-tree -r --name-only upstream/main -- "$KOTLIN_DIR")"
+fi
+
 UPSTREAM_CHANGED=$(git diff --name-only "$BASE" upstream/main)
 OURS_CHANGED=$(git diff --name-only "$BASE" main)
 
@@ -54,6 +64,8 @@ echo "== 需要人工核对：上游也改过、而这里是我们的版本 =="
 REVIEW=0
 while IFS= read -r p; do
   [[ -z "$p" ]] && continue
+  # 上游根本没有这个路径（base 导入时多出来的），不是「上游改了」，跳过
+  git cat-file -e "upstream/main:$p" 2>/dev/null || continue
   # 上游改过、我们没动过 → 说明我们这份是旧快照，上游可能修了 bug / 加了能力
   if ! grep -qxF "$p" <<< "$OURS_CHANGED"; then
     echo "   ! $p   （上游改了，我们没动 → 优先考虑跟进）"
