@@ -4,23 +4,25 @@ import '../core/util.dart';
 import '../tools/tool.dart';
 import 'sub_agent.dart';
 import 'sub_agent_runner.dart';
+import 'team_board.dart';
 import 'tool_run_context.dart';
 
 /// 子智能体相关的工具。没有可用的子智能体时返回空列表，模型也就看不到它们。
 List<AppTool> buildSubAgentTools({required List<SubAgent> agents}) {
   final usable = agents.where((a) => a.usable).toList();
   if (usable.isEmpty) return <AppTool>[];
-  return [_dispatchTool(usable), _discussTool(usable)];
+  return [_dispatchTool(usable), _discussTool(usable), _addTeamTasksTool(usable)];
 }
 
-class _Assignment {
-  _Assignment({required this.agent, required this.task, required this.deferred});
-  final SubAgent agent;
-  final String task;
-  final bool deferred;
-}
+/// 按会话挂载的任务板。`dispatch_subagents` 建板，`add_team_tasks` 追加。
+///
+/// 只放在内存里：一次对话生成过程结束后板还在，App 重启就清空——
+/// 团队任务本来就是一次会话内的事，不值得落盘。
+final _boards = <String, TeamBoard>{};
 
-String _short(String s, int max) => s.length <= max ? s : '${s.substring(0, max)}…';
+String _keyOf(ToolRunContext ctx) => ctx.sessionKey ?? '__default__';
+
+TeamBoard? currentBoard(ToolRunContext ctx) => _boards[_keyOf(ctx)];
 
 AppTool _dispatchTool(List<SubAgent> agents) {
   final names = [for (final a in agents) a.name];
@@ -42,9 +44,15 @@ ${subAgentCatalog(agents)}''',
           'items': {
             'type': 'object',
             'properties': {
+              'task_id': strProp('任务短 id，例如 t1、t2；留空会自动编号。depends_on 用它来引用'),
               'agent': strProp('子智能体名称，必须是：${names.join('、')}'),
-              'task': strProp('交给它的具体任务，必须包含足够上下文：哪只股票、哪个周期、要回答什么问题'),
-              'wait_for_others': {'type': 'boolean', 'description': '是否等同批其他任务完成后再执行。默认 false（立刻并行开工）；复核、出方案类应设为 true'},
+              'task': strProp('交给它的具体任务：目标、验收标准、边界。不要把所有上下文都塞进来，前置产出会自动转交'),
+              'depends_on': {
+                'type': 'array',
+                'items': {'type': 'string'},
+                'description': '依赖的前置任务 id 列表，只能引用排在它前面的任务。前置失败时这条会自动跳过',
+              },
+              'wait_for_others': {'type': 'boolean', 'description': '老写法：等同批全部任务完成后再跑。新任务请优先用 depends_on，它更精确'},
             },
             'required': ['agent', 'task'],
           },
@@ -65,27 +73,9 @@ ${subAgentCatalog(agents)}''',
       if (rows.isEmpty) {
         return jsonEncode({'error': 'assignments 为空，至少要分派一个任务'});
       }
-      final byName = {for (final a in agents) a.name: a};
-      final unknown = <String>[];
-      final planned = <_Assignment>[];
-      for (final row in rows) {
-        final m = asMap(row);
-        final name = asStr(m['agent']).trim();
-        final task = asStr(m['task']).trim();
-        final agent = byName[name];
-        if (agent == null) {
-          unknown.add(name.isEmpty ? '（空名称）' : name);
-          continue;
-        }
-        if (task.isEmpty) {
-          unknown.add('$name（任务描述为空）');
-          continue;
-        }
-        if (planned.length >= 6) break;
-        planned.add(_Assignment(agent: agent, task: task, deferred: m['wait_for_others'] == true));
-      }
-      if (planned.isEmpty) {
-        return jsonEncode({'error': '没有一个任务能分派', 'unknown_agents': unknown, 'available': names});
+      final parsed = parseAssignments(rows, agents);
+      if (parsed.tasks.isEmpty) {
+        return jsonEncode({'error': '没有一个任务能分派', 'problems': parsed.problems, 'available': names});
       }
 
       // 子智能体拿到的是同一次生成里的工具表，但永远不含分派工具本身（防套娃）。
@@ -98,34 +88,28 @@ ${subAgentCatalog(agents)}''',
           cancel: ctx.cancel,
           depth: ctx.depth + 1,
           onProgress: ctx.onProgress,
+          sessionKey: ctx.sessionKey,
         ),
         peers: agents,
       );
 
-      final results = <SubAgentResult>[];
-      final immediate = planned.where((e) => !e.deferred).toList();
-      final deferred = planned.where((e) => e.deferred).toList();
-      if (immediate.isNotEmpty) {
-        results.addAll(await Future.wait([for (final a in immediate) runner.run(a.agent, a.task)]));
-      }
-      if (deferred.isNotEmpty && !ctx.cancel.isCancelled) {
-        final brief = [
-          for (final r in results)
-            if (r.output.trim().isNotEmpty) '${r.agent}：${_short(r.output.trim(), 1200)}',
-        ].join('\n\n');
-        for (final a in deferred) {
-          if (ctx.cancel.isCancelled) break;
-          results.add(await runner.run(a.agent, a.task, extraContext: brief));
-        }
-      }
+      final board = TeamBoard(title: title.isEmpty ? '子智能体分派' : title, tasks: parsed.tasks);
+      _boards[_keyOf(ctx)] = board;
+      await runTeamBoard(board, runner, isCancelled: () => ctx.cancel.isCancelled, onProgress: ctx.onProgress);
 
       final payload = <String, dynamic>{
-        'title': title.isEmpty ? '子智能体分派' : title,
-        'ok': results.isNotEmpty && results.every((r) => r.ok),
-        'results': [for (final r in results) r.toJson()],
-        if (unknown.isNotEmpty) 'unknown_agents': unknown,
+        'title': board.title,
+        'ok': board.tasks.every((t) => t.status == TeamTaskStatus.done),
+        'board': board.toJson(),
+        'results': [
+          for (final t in board.tasks)
+            if (t.result != null) {'id': t.id, 'status': t.status.name, ...t.result!.toJson()},
+        ],
+        'problems': parsed.problems,
         if (ctx.cancel.isCancelled) 'cancelled': true,
-        'hint': '这些是子智能体交回的素材：数字照抄，结论由你自己判断并整合；不要把它们当成最终答案直接转述。',
+        'hint':
+            '这些是子智能体交回的素材：数字照抄，结论由你自己判断并整合；不要把它们当成最终答案直接转述。'
+            '还有活要补时，用 add_team_tasks 追加到同一张任务板，不要重新 dispatch 一遍。',
       };
       return jsonEncode(payload);
     },
@@ -200,6 +184,118 @@ AppTool _discussTool(List<SubAgent> agents) {
         if (unknown.isNotEmpty) 'unknown_agents': unknown,
         if (ctx.cancel.isCancelled) 'cancelled': true,
         'hint': '这是讨论记录：分歧点比结论更值钱。最终判断由你自己下，不要把发言原样转给用户。',
+      });
+    },
+  );
+}
+
+/// 往当前任务板追加任务。
+///
+/// 这是清水 1.4.2 里 `add_team_tasks` 的对应实现：**不重新建板**，
+/// 新任务并入同一张板继续跑，已有的 id 可以直接被 depends_on 引用。
+///
+/// 诚实边界：目前追加发生在 dispatch 已经返回之后，不会与仍在执行的子任务
+/// 真正并行——那需要把 dispatch 改成后台运行，改动面太大，留到下一步。
+AppTool _addTeamTasksTool(List<SubAgent> agents) {
+  final names = [for (final a in agents) a.name];
+  return AppTool(
+    name: 'add_team_tasks',
+    displayName: '追加任务',
+    description: '''往当前这次分派的任务板追加新任务，不重新建板、不重跑已完成的活。
+适合「已经分派一批、发现还缺一件事」的场景；新任务可以直接 depends_on 引用任务板上已有的 id。
+如果从来没有分派过，请用 dispatch_subagents 建板。
+可用子智能体：
+${subAgentCatalog(agents)}''',
+    parameters: objectSchema(
+      {
+        'assignments': {
+          'type': 'array',
+          'description': '要追加的任务列表，最多 6 条',
+          'items': {
+            'type': 'object',
+            'properties': {
+              'task_id': strProp('任务短 id，例如 t7；留空自动编号。不能与已有 id 重复'),
+              'agent': strProp('子智能体名称，必须是：${names.join('、')}'),
+              'task': strProp('任务内容：目标、验收标准、边界'),
+              'depends_on': {
+                'type': 'array',
+                'items': {'type': 'string'},
+                'description': '依赖的任务 id，可以引用任务板上已有的任务，也可以引用本批次前面的任务',
+              },
+            },
+            'required': ['agent', 'task'],
+          },
+        },
+      },
+      required: ['assignments'],
+    ),
+    promptHint:
+        '已经分派过、还缺活时用 `add_team_tasks` 追加到同一张任务板；'
+        '不要重新 dispatch 一遍，那会把已经做完的活再烧一次 token。',
+    execute: (args) async {
+      final ctx = currentToolRun();
+      if (ctx == null) {
+        return jsonEncode({'error': '子智能体只能在一次对话生成过程中使用'});
+      }
+      final board = currentBoard(ctx);
+      if (board == null) {
+        return jsonEncode({'error': '团队尚未启动，无法追加任务；请先用 dispatch_subagents 建板'});
+      }
+      final rows = asList(args['assignments']);
+      if (rows.isEmpty) {
+        return jsonEncode({'error': 'assignments 为空'});
+      }
+      // 已存在的 id 不能被覆盖
+      final existing = <String>{for (final t in board.tasks) t.id};
+      final preFixed = <dynamic>[];
+      for (final row in rows) {
+        final m = Map<String, dynamic>.from(asMap(row));
+        final id = asStr(m['task_id']).trim();
+        if (id.isEmpty || existing.contains(id)) {
+          m['task_id'] = 't${board.tasks.length + preFixed.length + 1}';
+        }
+        preFixed.add(m);
+      }
+      final parsed = parseAssignments(preFixed, agents, knownIds: existing);
+      if (parsed.tasks.isEmpty) {
+        return jsonEncode({'error': '没有一条能追加', 'problems': parsed.problems, 'available': names});
+      }
+      // 新任务允许依赖板上已有的任务；parseAssignments 只校验同一批次内部顺序，
+      // 这里再把「引用了板上不存在的 id」挑出来。
+      final bad = <String>[];
+      for (final t in parsed.tasks) {
+        for (final d in t.dependsOn) {
+          if (!existing.contains(d) && !parsed.tasks.any((x) => x.id == d)) bad.add('${t.id} -> $d');
+        }
+      }
+      if (bad.isNotEmpty) {
+        return jsonEncode({
+          'error': '依赖的任务 id 不存在',
+          'problems': bad,
+          'board_ids': [for (final t in board.tasks) t.id],
+        });
+      }
+      board.tasks.addAll(parsed.tasks);
+      final runner = SubAgentRunner(
+        ToolRunContext(
+          settings: ctx.settings,
+          provider: ctx.provider,
+          model: ctx.model,
+          tools: ctx.tools,
+          cancel: ctx.cancel,
+          depth: ctx.depth + 1,
+          onProgress: ctx.onProgress,
+          sessionKey: ctx.sessionKey,
+        ),
+        peers: agents,
+      );
+      await runTeamBoard(board, runner, isCancelled: () => ctx.cancel.isCancelled, onProgress: ctx.onProgress);
+      return jsonEncode({
+        'ok': parsed.tasks.every((t) => t.status == TeamTaskStatus.done),
+        'added': [for (final t in parsed.tasks) t.toJson()],
+        'board': board.toJson(),
+        'problems': parsed.problems,
+        if (ctx.cancel.isCancelled) 'cancelled': true,
       });
     },
   );

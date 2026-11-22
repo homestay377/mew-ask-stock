@@ -22,10 +22,12 @@ import '../data/models_misc.dart';
 import '../data/settings.dart';
 import '../state/settings_store.dart';
 import '../tools/app_tools.dart';
+import '../tools/http_tool.dart';
 import '../tools/local_tools.dart';
 import '../tools/mcp.dart';
 import '../tools/stock_tools.dart';
 import '../tools/tool.dart';
+import '../tools/workspace_tools.dart';
 import 'accumulator.dart';
 import 'auto_compression.dart';
 import 'helpers.dart';
@@ -256,6 +258,9 @@ class ChatController extends ChangeNotifier {
       if (a.enableMemory) ...buildMemoryTools(db, assistantId: a.useGlobalMemory ? null : a.id),
       // 股票分析：数据由 App 自己直取，不依赖任何界面状态。
       ...buildStockTools(enabled: a.enableStockTools),
+      // 基础执行能力：出网 + 受控文件读写。主智能体与子智能体共用同一套。
+      buildHttpTool(),
+      ...buildWorkspaceTools(),
       // 子智能体分派：配置为空时返回空列表，模型就看不到这个工具。
       ...buildSubAgentTools(agents: await SubAgentStore.load()),
     ];
@@ -393,7 +398,14 @@ class ChatController extends ChangeNotifier {
     final toolMap = {for (final t in tools) t.name: t};
     // 工具只收到参数，看不到模型与会话；用 Zone 注入这一份上下文，
     // 分派类工具（子智能体）靠它拿到当前模型、工具表和取消令牌。
-    final runCtx = ToolRunContext(settings: settings, provider: provider, model: model, tools: tools, cancel: cancel);
+    final runCtx = ToolRunContext(
+      settings: settings,
+      provider: provider,
+      model: model,
+      tools: tools,
+      cancel: cancel,
+      sessionKey: _conv.id,
+    );
     final memories = a.enableMemory
         ? await memoriesForPrompt(db, assistantId: a.useGlobalMemory ? null : a.id)
         : <MemoryItem>[];
@@ -592,6 +604,7 @@ class ChatController extends ChangeNotifier {
         cancel: runCtx.cancel,
         depth: runCtx.depth,
         onProgress: pushProgress,
+        sessionKey: runCtx.sessionKey,
       );
       try {
         final out = await runWithToolContext(callCtx, () => tool.execute(current.inputJson)).timeout(limit);

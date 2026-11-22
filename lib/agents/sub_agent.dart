@@ -87,7 +87,13 @@ class SubAgent {
 }
 
 /// 只读子智能体禁止使用的工具：会改变界面、画线或外部状态的那些。
-const readOnlyBlockedTools = <String>{'chart_annotate', 'stock_panel_show'};
+const readOnlyBlockedTools = <String>{
+  'chart_annotate',
+  'stock_panel_show',
+  // 工作区写操作：只读子智能体只能读文件与列目录
+  'workspace_write_file',
+  'workspace_edit_file',
+};
 
 /// 内置子智能体。提示词按「问股」的实际能力写，不列我们没实现的工具。
 final builtinSubAgents = <SubAgent>[
@@ -99,8 +105,17 @@ final builtinSubAgents = <SubAgent>[
         '你是行情侦察员，负责快速摸清一只股票或一组股票的现状：'
         '最新报价、多周期（日/周/60 分/30 分）结构方向、有无背驰与买卖点、量能是否配合。'
         '先用工具取数，再下结论；每条结论都要带具体数字，不要只给「偏强」「偏弱」这种空话。',
-    toolNames: ['stock_quote', 'stock_kline', 'stock_levels', 'scan_stocks', 'chart_context'],
-    readOnly: true,
+    toolNames: [
+      'stock_quote',
+      'stock_kline',
+      'stock_levels',
+      'scan_stocks',
+      'chart_context',
+      'http_request',
+      'workspace_read_file',
+      'workspace_write_file',
+    ],
+    readOnly: false,
     builtin: true,
   ),
   SubAgent(
@@ -125,8 +140,16 @@ final builtinSubAgents = <SubAgent>[
         '你是资料研究员，负责查基本面与公开信息：市盈率、市值、每股收益、行业地位、近期公开消息。'
         '只用工具真实取到的数据，取不到就明确写「取不到」，绝不凭印象编数字。'
         '每条结论后面注明来源（哪个接口/哪一天）。',
-    toolNames: ['get_fundamental', 'stock_quote', 'chart_context'],
-    readOnly: true,
+    toolNames: [
+      'get_fundamental',
+      'stock_quote',
+      'chart_context',
+      'http_request',
+      'workspace_read_file',
+      'workspace_write_file',
+      'workspace_edit_file',
+    ],
+    readOnly: false,
     builtin: true,
   ),
   SubAgent(
