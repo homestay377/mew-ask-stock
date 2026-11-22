@@ -20,6 +20,7 @@ class ToolRunContext {
     required this.cancel,
     this.depth = 0,
     this.onProgress,
+    this.onBoardUpdate,
     this.sessionKey,
   });
 
@@ -38,6 +39,10 @@ class ToolRunContext {
 
   /// 子智能体的过程行（P2 用来实时显示，目前可以留空）。
   final void Function(String line)? onProgress;
+
+  /// 团队任务板的实时快照。每有一次状态变化就推一次，
+  /// 界面据此画出「运行中 / 等待前置 / 已完成 / 已跳过」。
+  final void Function(Map<String, dynamic> board)? onBoardUpdate;
 
   /// 当前会话标识。团队任务板按它挂载，`add_team_tasks` 靠它找回同一张板。
   /// 为空时退化成"最近一次分派"的单槽模式。

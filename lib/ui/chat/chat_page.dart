@@ -694,6 +694,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           onPressed: () => showSubAgentTeamSheet(
             context,
             liveParts: () => [for (final n in c.conversation.nodes) ...n.current.parts],
+            onSubmit: (text) => c.send([TextPart(text)]),
           ),
         ),
         IconButton(

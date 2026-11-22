@@ -596,6 +596,15 @@ class ChatController extends ChangeNotifier {
         onUpdate(List.unmodifiable(acc.parts));
       }
 
+      // 团队任务板的实时快照写进 meta.board：界面据此画「运行中 / 等待前置」。
+      void pushBoard(Map<String, dynamic> board) {
+        final i = acc.parts.indexWhere((p) => p is ToolPart && p.callId == call.callId);
+        if (i < 0) return;
+        final tp = acc.parts[i] as ToolPart;
+        acc.parts[i] = tp.copyWith(meta: {...?tp.meta, 'board': board});
+        onUpdate(List.unmodifiable(acc.parts));
+      }
+
       final callCtx = ToolRunContext(
         settings: runCtx.settings,
         provider: runCtx.provider,
@@ -604,6 +613,7 @@ class ChatController extends ChangeNotifier {
         cancel: runCtx.cancel,
         depth: runCtx.depth,
         onProgress: pushProgress,
+        onBoardUpdate: pushBoard,
         sessionKey: runCtx.sessionKey,
       );
       try {

@@ -100,13 +100,16 @@ Future<void> runTeamBoard(
   SubAgentRunner runner, {
   required bool Function() isCancelled,
   void Function(String)? onProgress,
+  void Function(Map<String, dynamic>)? onBoard,
 }) async {
+  void push() => onBoard?.call(board.toJson());
+  push();
   var guard = 0;
   while (true) {
     if (isCancelled()) break;
     if (++guard > 64) break;
 
-    // 1) 先把"前置已经废了"的任务判死，避免它们一直挂着。
+    // 1) 先把「前置已经废了」的任务判死，避免它们一直挂着。
     var changed = true;
     while (changed) {
       changed = false;
@@ -137,6 +140,7 @@ Future<void> runTeamBoard(
           t.error = because;
           changed = true;
           onProgress?.call('${t.id} 跳过：$because');
+          push();
         }
       }
     }
@@ -163,15 +167,26 @@ Future<void> runTeamBoard(
           t.error = '依赖无法满足（可能有环）';
         }
       }
+      push();
       break;
     }
 
-    await Future.wait([for (final t in ready) _runOne(t, board, runner, onProgress: onProgress)]);
+    // 先把这一批全部标成 running 推出去，界面才能马上看到「谁在跑」。
+    for (final t in ready) {
+      t.status = TeamTaskStatus.running;
+    }
+    push();
+    await Future.wait([for (final t in ready) _runOne(t, board, runner, onProgress: onProgress, onBoard: push)]);
   }
 }
 
-Future<void> _runOne(TeamTask t, TeamBoard board, SubAgentRunner runner, {void Function(String)? onProgress}) async {
-  t.status = TeamTaskStatus.running;
+Future<void> _runOne(
+  TeamTask t,
+  TeamBoard board,
+  SubAgentRunner runner, {
+  void Function(String)? onProgress,
+  void Function()? onBoard,
+}) async {
   onProgress?.call('${t.id} · ${t.agentName} 开工');
   final byName = <String, SubAgent>{};
   for (final a in runner.peers) {
@@ -181,6 +196,7 @@ Future<void> _runOne(TeamTask t, TeamBoard board, SubAgentRunner runner, {void F
   if (agent == null) {
     t.status = TeamTaskStatus.failed;
     t.error = '没有这个子智能体：${t.agentName}';
+    onBoard?.call();
     return;
   }
   final sw = Stopwatch()..start();
@@ -199,13 +215,10 @@ Future<void> _runOne(TeamTask t, TeamBoard board, SubAgentRunner runner, {void F
     t.status = TeamTaskStatus.failed;
     t.error = '$e';
   }
+  onBoard?.call();
   onProgress?.call('${t.id} · ${t.agentName} ${t.status.name}');
 }
 
-/// 从模型给的 assignments 里解析出任务板。
-///
-/// 兼容没有 `task_id` 的老写法：自动补 t1…tN，`wait_for_others: true` 转成
-/// "依赖全部前面的任务"，保证旧提示行为不至于直接失效。
 ({List<TeamTask> tasks, List<String> problems}) parseAssignments(
   List<dynamic> rows,
   List<SubAgent> agents, {

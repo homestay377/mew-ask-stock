@@ -88,6 +88,7 @@ ${subAgentCatalog(agents)}''',
           cancel: ctx.cancel,
           depth: ctx.depth + 1,
           onProgress: ctx.onProgress,
+          onBoardUpdate: ctx.onBoardUpdate,
           sessionKey: ctx.sessionKey,
         ),
         peers: agents,
@@ -95,7 +96,13 @@ ${subAgentCatalog(agents)}''',
 
       final board = TeamBoard(title: title.isEmpty ? '子智能体分派' : title, tasks: parsed.tasks);
       _boards[_keyOf(ctx)] = board;
-      await runTeamBoard(board, runner, isCancelled: () => ctx.cancel.isCancelled, onProgress: ctx.onProgress);
+      await runTeamBoard(
+        board,
+        runner,
+        isCancelled: () => ctx.cancel.isCancelled,
+        onProgress: ctx.onProgress,
+        onBoard: ctx.onBoardUpdate,
+      );
 
       final payload = <String, dynamic>{
         'title': board.title,
@@ -285,11 +292,18 @@ ${subAgentCatalog(agents)}''',
           cancel: ctx.cancel,
           depth: ctx.depth + 1,
           onProgress: ctx.onProgress,
+          onBoardUpdate: ctx.onBoardUpdate,
           sessionKey: ctx.sessionKey,
         ),
         peers: agents,
       );
-      await runTeamBoard(board, runner, isCancelled: () => ctx.cancel.isCancelled, onProgress: ctx.onProgress);
+      await runTeamBoard(
+        board,
+        runner,
+        isCancelled: () => ctx.cancel.isCancelled,
+        onProgress: ctx.onProgress,
+        onBoard: ctx.onBoardUpdate,
+      );
       return jsonEncode({
         'ok': parsed.tasks.every((t) => t.status == TeamTaskStatus.done),
         'added': [for (final t in parsed.tasks) t.toJson()],
