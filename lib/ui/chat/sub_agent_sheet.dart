@@ -392,7 +392,7 @@ class _TeamSheetState extends State<_TeamSheet> {
       color: running ? scheme.primaryContainer.withValues(alpha: 0.45) : null,
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: (output.isEmpty && error.isEmpty) ? null : () => _showOutput(context, t),
+        onTap: (output.isEmpty && error.isEmpty) ? null : () => _showOutput(context, task),
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Column(
