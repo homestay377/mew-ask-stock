@@ -23,8 +23,11 @@ final out = await runWithToolContext(runCtx, () => tool.execute(args)).timeout(l
 | `lib/agents/tool_run_context.dart` | 上下文对象 + Zone 注入 |
 | `lib/agents/sub_agent.dart` | 配置模型、只读写工具黑名单、5 个内置条目、给模型看的目录 |
 | `lib/agents/sub_agent_store.dart` | `sub_agents.json` 持久化 + 内置种子标记 |
-| `lib/agents/sub_agent_runner.dart` | 单任务引擎：独立提示词、白名单、24 步上限、1 层嵌套、单工具 3 分钟 |
-| `lib/agents/sub_agent_tools.dart` | `dispatch_subagents`：同批并行、`wait_for_others` 后置 |
+| `lib/agents/sub_agent_runner.dart` | 单任务引擎：独立提示词、白名单、24 步上限、1 层嵌套、单工具 3 分钟；`ask_main_agent` / `request_capability` / `ask_peer` 三个协作工具 |
+| `lib/agents/team_board.dart` | 团队任务板：`task_id` + `depends_on` 依赖图、前置失败自动跳过、依赖产出按预算转交 |
+| `lib/agents/sub_agent_tools.dart` | `dispatch_subagents`（建板并跑 DAG）、`discuss_subagents`、`add_team_tasks`（往同一张板追加） |
+| `lib/tools/http_tool.dart` | `http_request`：子智能体的无条件出网能力 |
+| `lib/tools/workspace_tools.dart` | `workspace_read_file` / `write_file` / `edit_file` / `list_dir`，路径限制在根目录白名单内 |
 | `lib/ui/pages/sub_agents_page.dart` | 设置页：增删改、启停、模型、白名单、只读 |
 
 ## 边界
@@ -58,3 +61,76 @@ final out = await runWithToolContext(runCtx, () => tool.execute(args)).timeout(l
 
 - **指数/板块/赚钱效应**：「市场模块」需要有可靠的指数与板块数据接口。现在只有个股 K 线（腾讯/新浪/东财）与基本面，没有板块强弱、涨停家数这类数据。硬写就等于让模型编数字，所以不做。
 - **资讯时效**：没有接入新闻源，`search_web` 只在配置了搜索服务时可用。接入后可以再加「资讯核对」子智能体，届时再说。
+
+## P4 补的东西：让它真能干活
+
+P3 之后子智能体仍有一个硬伤：它只能取数，取不到就编，编完给一句话。对照清水 1.4.2 拆包结果，缺的是**基础执行能力**和**求助通道**，不是提示词技巧。
+
+### 基础执行能力（无条件注入）
+
+`http_request` 与 `workspace_*` 是子智能体的基础能力，**不受工具白名单裁剪**，只受「只读」约束：
+
+- `http_request`：GET/POST/PUT/PATCH/DELETE/HEAD，自定义 header 与 body；`save_to` 可把响应落盘。
+  512 KB 读取上限，正文默认 8000 字符，二进制（图片/zip/APK）只返回大小与落盘指引，不会把上下文撑爆。
+  非 2xx **不抛异常**：抓 404 页面、看错误体是正常需求。
+- `workspace_read_file` / `workspace_write_file` / `workspace_edit_file` / `workspace_list_dir`：
+  路径归一化后限制在允许的根目录内（应用支持目录、`/storage/emulated/0`、`/data/local/tmp`、临时目录），越界直接拒绝。
+  只读子智能体只拿到「读文件 + 列目录」两件套。
+
+### 协作通道
+
+| 工具 | 作用 | 上限 |
+|---|---|---|
+| `ask_main_agent` | 缺上下文/要拍板时问主智能体。主智能体用**无工具**纯文本作答，避免递归派发 | 每任务 3 次 |
+| `request_capability` | 缺工具时申请。只批准会话里真实存在的工具；只读子智能体不能申请写操作。获批后**下一步立即生效** | 每任务 3 次 |
+| `ask_peer` | 转问同批同伴 | 每任务 3 次 |
+
+关于「立刻生效」：`run()` 的循环里，只要 `_grantedTools` 非空就每轮重算工具表并重建 `GenerationParams`，
+否则模型会一直看到旧的工具列表，申请等于白申请。
+
+### 团队任务板（DAG，取代 `wait_for_others` 二段式）
+
+```json
+{
+  "assignments": [
+    {"task_id": "t1", "agent": "行情侦察", "task": "..."},
+    {"task_id": "t2", "agent": "结构审查", "task": "...", "depends_on": ["t1"]},
+    {"task_id": "t3", "agent": "策略方案", "task": "...", "depends_on": ["t1", "t2"]}
+  ]
+}
+```
+
+- 依赖全部 `done` 的任务立刻**并行**开工；
+- 前置 `failed` / `skipped` 时，下游标 `skipped` 并写明原因，**不再消耗 token**；
+- 前置产出按 **2500 字/任务、8000 字总量** 的预算自动拼给下游；
+- 依赖只能引用排在它前面的任务，引用不存在或成环会被判死。
+
+老写法兼容：`wait_for_others: true` 且没写 `depends_on` → 自动转成「依赖前面全部任务」。
+
+### 运行期追加
+
+`add_team_tasks` 把新任务并入同一张板，可以 `depends_on` 引用板上已有的 id，不重跑已完成的活。
+板按 `ToolRunContext.sessionKey`（会话 id）挂在内存里，App 重启即清空——团队任务本来就是一次会话内的事。
+
+**诚实边界**：目前追加发生在 `dispatch_subagents` 已经返回之后，不会与仍在执行的子任务真正并行。
+真正做到「中途插入」需要把 dispatch 改成后台任务，改动面太大，留到下一步。
+
+### 提示词
+
+三段硬约束，都是清水 1.4.2 里实测存在的：
+
+1. **工作准则**：执行者不是裁判；不许用「我做不到」「无法协助」推诿；先动手验证再说话；真做不到才说明原因与替代方案。
+2. **交付格式**：`【结论】/【证据】/【未完成】` 三段，不许复述工具原文。
+3. **兜底**：跑满 24 步仍没结论时，按同样的格式声明「取了几次、成功几次、涉及哪些工具、失败哪些」，不再把工具原文整段倒给主控。
+
+### 只读边界变化
+
+`readOnlyBlockedTools` 增加 `workspace_write_file`、`workspace_edit_file`。
+内置条目里 **行情侦察**、**资料研究** 放开只读（它们本来就要出网取数），
+结构审查 / 策略方案 / 数据核验 保持只读，图文标注保持可写。
+
+### 还没做
+
+- dispatch 后台化，实现真正的运行期并行追加；
+- 逐 token 实时输出 + 单独终止某一个子智能体（现在的进度行仍是 `onProgress` 字符串）；
+- 子智能体 token 归集进主对话用量统计。

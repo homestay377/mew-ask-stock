@@ -89,9 +89,11 @@ void main() {
         SubAgent(name: '乙', enabled: false),
       ],
     );
-    expect([for (final t in tools) t.name], ['dispatch_subagents', 'discuss_subagents']);
+    expect([for (final t in tools) t.name], ['dispatch_subagents', 'discuss_subagents', 'add_team_tasks']);
     expect(tools.first.parameters['required'], containsAll(['tool_title', 'assignments']));
-    expect(tools.last.parameters['required'], contains('topic'));
+    expect(tools[1].parameters['required'], contains('topic'));
+    // 团队任务板：追加任务只需 assignments，不重建板
+    expect(tools.last.parameters['required'], contains('assignments'));
   });
 
   test('没有可用子智能体时一个工具都不注册', () {
