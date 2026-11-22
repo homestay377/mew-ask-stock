@@ -61,15 +61,15 @@ void main() {
 
     test('依赖只能引用前面的任务', () {
       final r = parseAssignments([
-        {'agent': '甲', 'task': 'a', 'task_id': 't2'},
         {
-          'agent': '乙',
-          'task': 'b',
+          'agent': '甲',
+          'task': 'a',
           'task_id': 't1',
           'depends_on': ['t2'],
         },
+        {'agent': '乙', 'task': 'b', 'task_id': 't2'},
       ], agents);
-      // t1 依赖了排在它后面的 t2
+      // t1 排在最前面，却依赖了排在它后面的 t2
       expect(r.problems.any((p) => p.contains('排在它后面')), isTrue);
     });
 
