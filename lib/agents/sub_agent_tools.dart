@@ -102,6 +102,7 @@ ${subAgentCatalog(agents)}''',
         isCancelled: () => ctx.cancel.isCancelled,
         onProgress: ctx.onProgress,
         onBoard: ctx.onBoardUpdate,
+        globalCancel: ctx.cancel,
       );
 
       final payload = <String, dynamic>{
@@ -303,6 +304,7 @@ ${subAgentCatalog(agents)}''',
         isCancelled: () => ctx.cancel.isCancelled,
         onProgress: ctx.onProgress,
         onBoard: ctx.onBoardUpdate,
+        globalCancel: ctx.cancel,
       );
       return jsonEncode({
         'ok': parsed.tasks.every((t) => t.status == TeamTaskStatus.done),

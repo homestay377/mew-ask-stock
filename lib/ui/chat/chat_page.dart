@@ -76,6 +76,18 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// Space after the last message: the dock plus the old breathing room.
   double get _listEndPadding => _dockInset(_dock.value) + 12;
 
+  /// 当前会话里是否有正在跑的分派/追加（工具还没返回）。
+  bool _teamRunning(Conversation conv) {
+    for (final n in conv.nodes) {
+      for (final p in n.current.parts) {
+        if (p is ToolPart && (p.name == 'dispatch_subagents' || p.name == 'add_team_tasks') && p.output == null) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   void _onDockHeight(double height) {
     if ((height - _dock.value).abs() > 0.5) _dock.value = height;
   }
@@ -565,6 +577,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                       items: c.generating ? const [] : conv.suggestions,
                       onTap: (v) => c.send([TextPart(v)]),
                     ),
+                    // 团队在跑时给一条明确的横幅：消息会直接交给团队，
+                    // 右侧入口打开实时任务板（对齐清水的「团队运行中」条）。
+                    if (_teamRunning(conv))
+                      _TeamRunningBanner(
+                        onOpen: () => showSubAgentTeamSheet(
+                          context,
+                          liveParts: () => [for (final n in c.conversation.nodes) ...n.current.parts],
+                          onSubmit: (text) => c.send([TextPart(text)]),
+                        ),
+                      ),
                     Composer(
                       key: _composer,
                       settings: s,
@@ -1120,6 +1142,52 @@ class _EditSheetState extends State<_EditSheet> {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 团队运行中横幅：告诉用户"你现在发的话会交给团队"，并给出任务板入口。
+class _TeamRunningBanner extends StatelessWidget {
+  const _TeamRunningBanner({required this.onOpen});
+
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      child: Material(
+        color: scheme.primaryContainer.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: onOpen,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+            child: Row(
+              children: [
+                Icon(Icons.groups_2_outlined, size: 16, color: scheme.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    t('团队运行中 · 发送的消息会直接交给团队', 'Team running · your messages go straight to the team'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.primary),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  t('查看智能体团队', 'Open team'),
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.primary),
+                ),
+                Icon(Icons.chevron_right_rounded, size: 16, color: scheme.primary),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

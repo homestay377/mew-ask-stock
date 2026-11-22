@@ -5,6 +5,7 @@ import '../ai/message.dart';
 import '../ai/provider.dart';
 import '../ai/provider_config.dart';
 import '../chat/accumulator.dart';
+import '../core/net.dart';
 import '../core/util.dart';
 import '../tools/http_tool.dart';
 import '../tools/tool.dart';
@@ -115,9 +116,17 @@ String _fallbackDigest(List<SubAgentStep> steps) {
 /// 和参考实现（ds7891/- 的 Kotlin 版）的关系：结构与预算一致，代码是按
 /// MewHub 的 Dart 接口重写的，不是移植。
 class SubAgentRunner {
-  SubAgentRunner(this.ctx, {this.peers = const []});
+  SubAgentRunner(this.ctx, {this.peers = const [], this.cancelOverride});
 
   final ToolRunContext ctx;
+
+  /// 单个任务的取消令牌。为空时用 [ctx] 的全局令牌。
+  ///
+  /// 团队任务板给每个任务一个独立令牌，界面上就能只停掉某一个子智能体，
+  /// 而不打断同批其他任务（对齐清水 1.4.2 的单独终止）。
+  final CancelToken? cancelOverride;
+
+  CancelToken get _cancel => cancelOverride ?? ctx.cancel;
 
   /// 同批的其他子智能体，供 `ask_peer` 互相提问。
   final List<SubAgent> peers;
@@ -209,7 +218,7 @@ class SubAgentRunner {
     ctx.onProgress?.call('${agent.name} · 开工');
 
     for (var step = 0; step < maxSteps; step++) {
-      if (ctx.cancel.isCancelled) break;
+      if (_cancel.isCancelled) break;
       // request_capability 获批的工具要能从下一步起就用上，所以每轮重算工具表。
       if (step > 0 && _grantedTools.isNotEmpty) {
         usable = model.tools
@@ -232,7 +241,7 @@ class SubAgentRunner {
       }
       final round = PartAccumulator();
       try {
-        await for (final chunk in ai.stream(msgs, params, cancel: ctx.cancel)) {
+        await for (final chunk in ai.stream(msgs, params, cancel: _cancel)) {
           round.add(chunk);
         }
       } catch (e) {
@@ -247,7 +256,7 @@ class SubAgentRunner {
         break;
       }
       for (final call in pending) {
-        if (ctx.cancel.isCancelled) break;
+        if (_cancel.isCancelled) break;
         final sw = Stopwatch()..start();
         var isError = false;
         String out;
@@ -293,7 +302,7 @@ class SubAgentRunner {
       steps: steps,
       usage: usage,
       elapsedMs: elapsed(),
-      cancelled: ctx.cancel.isCancelled,
+      cancelled: _cancel.isCancelled,
     );
     ctx.onProgress?.call('${agent.name} · ${result.ok ? '完成' : '失败'}');
     return result;
@@ -313,7 +322,7 @@ class SubAgentRunner {
     final maxRounds = rounds.clamp(1, 5);
     for (var round = 1; round <= maxRounds; round++) {
       for (final agent in agents) {
-        if (ctx.cancel.isCancelled) break;
+        if (_cancel.isCancelled) break;
         final task = StringBuffer()
           ..writeln('讨论主题：$topic')
           ..writeln('这是第 $round 轮。');
@@ -331,7 +340,7 @@ class SubAgentRunner {
           transcript.writeln('【${agent.name} · 第 $round 轮】${_clip(turn.output.trim(), 1200)}');
         }
       }
-      if (ctx.cancel.isCancelled) break;
+      if (_cancel.isCancelled) break;
     }
     return out;
   }
@@ -458,7 +467,7 @@ class SubAgentRunner {
           ChatMessage.text(Role.user, q),
         ];
         final acc = PartAccumulator();
-        await for (final chunk in ai.stream(msgs, params, cancel: ctx.cancel)) {
+        await for (final chunk in ai.stream(msgs, params, cancel: _cancel)) {
           acc.add(chunk);
         }
         final answer = _textOf(acc.parts).trim();
@@ -550,7 +559,7 @@ class SubAgentRunner {
             provider: ctx.provider,
             model: ctx.model,
             tools: ctx.tools,
-            cancel: ctx.cancel,
+            cancel: _cancel,
             depth: ctx.depth + 1,
             onProgress: ctx.onProgress,
           ),

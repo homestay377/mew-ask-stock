@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import '../core/net.dart';
+
 import '../core/util.dart';
 import 'sub_agent.dart';
 import 'sub_agent_runner.dart';
@@ -28,16 +30,21 @@ class TeamTask {
   bool get isTerminal =>
       status == TeamTaskStatus.done || status == TeamTaskStatus.failed || status == TeamTaskStatus.skipped;
 
-  Map<String, dynamic> toJson() => {
+  Map<String, dynamic> toJson({String runId = ''}) => {
     'id': id,
+    if (runId.isNotEmpty) 'run_key': '$runId/$id',
     'agent': agentName,
     'status': status.name,
     'depends_on': dependsOn,
+    // 任务原文要带上：界面在任务还没产出时要靠它显示「这条在干什么」。
+    'task': task,
     if (result != null) 'ok': result!.ok,
     if (result != null) 'output': result!.output,
     if (error != null) 'error': error,
     'ms': elapsedMs,
     if (result != null) 'steps': [for (final s in result!.steps) s.toJson()],
+    if (result != null) 'tokens': {'input': result!.usage.input, 'output': result!.usage.output},
+    if (result != null) 'step_count': result!.steps.length,
   };
 }
 
@@ -51,6 +58,9 @@ class TeamBoard {
 
   final String title;
   final List<TeamTask> tasks;
+
+  /// 这张板的唯一标识，给「单独终止某个子智能体」做 key 用。
+  final String runId = DateTime.now().microsecondsSinceEpoch.toString();
   bool closed = false;
 
   TeamTask? byId(String id) {
@@ -79,14 +89,32 @@ class TeamBoard {
     return parts.join('\n\n');
   }
 
-  Map<String, dynamic> toJson() => {
-    'title': title,
-    'closed': closed,
-    'tasks': [for (final t in tasks) t.toJson()],
-    'done': tasks.where((t) => t.status == TeamTaskStatus.done).length,
-    'failed': tasks.where((t) => t.status == TeamTaskStatus.failed).length,
-    'skipped': tasks.where((t) => t.status == TeamTaskStatus.skipped).length,
-  };
+  Map<String, dynamic> toJson() {
+    var tokensIn = 0;
+    var tokensOut = 0;
+    var elapsed = 0;
+    for (final t in tasks) {
+      if (t.result != null) {
+        tokensIn += t.result!.usage.input;
+        tokensOut += t.result!.usage.output;
+      }
+      elapsed += t.elapsedMs;
+    }
+    return {
+      'title': title,
+      'closed': closed,
+      'run_id': runId,
+      'tasks': [for (final t in tasks) t.toJson(runId: runId)],
+      'done': tasks.where((t) => t.status == TeamTaskStatus.done).length,
+      'failed': tasks.where((t) => t.status == TeamTaskStatus.failed).length,
+      'skipped': tasks.where((t) => t.status == TeamTaskStatus.skipped).length,
+      'running': tasks.where((t) => t.status == TeamTaskStatus.running).length,
+      'pending': tasks.where((t) => t.status == TeamTaskStatus.pending).length,
+      'tokens_in': tokensIn,
+      'tokens_out': tokensOut,
+      'elapsed_ms': elapsed,
+    };
+  }
 }
 
 /// 按依赖图执行任务板。
@@ -101,6 +129,7 @@ Future<void> runTeamBoard(
   required bool Function() isCancelled,
   void Function(String)? onProgress,
   void Function(Map<String, dynamic>)? onBoard,
+  CancelToken? globalCancel,
 }) async {
   void push() => onBoard?.call(board.toJson());
   push();
@@ -176,7 +205,10 @@ Future<void> runTeamBoard(
       t.status = TeamTaskStatus.running;
     }
     push();
-    await Future.wait([for (final t in ready) _runOne(t, board, runner, onProgress: onProgress, onBoard: push)]);
+    await Future.wait([
+      for (final t in ready)
+        _runOne(t, board, runner, onProgress: onProgress, onBoard: push, globalCancel: globalCancel),
+    ]);
   }
 }
 
@@ -186,6 +218,7 @@ Future<void> _runOne(
   SubAgentRunner runner, {
   void Function(String)? onProgress,
   void Function()? onBoard,
+  CancelToken? globalCancel,
 }) async {
   onProgress?.call('${t.id} · ${t.agentName} 开工');
   final byName = <String, SubAgent>{};
@@ -199,9 +232,16 @@ Future<void> _runOne(
     onBoard?.call();
     return;
   }
+  // 每个子任务一个独立令牌：全局取消会联动，界面也能只停这一个。
+  final local = CancelToken();
+  final runKey = '${board.runId}/${t.id}';
+  _runningTasks[runKey] = local;
+  final g = globalCancel;
+  if (g != null) unawaited(g.future.then((_) => local.cancel()));
+  final taskRunner = SubAgentRunner(runner.ctx, peers: runner.peers, cancelOverride: local);
   final sw = Stopwatch()..start();
   try {
-    final r = await runner.run(agent, t.task, extraContext: board.briefFor(t));
+    final r = await taskRunner.run(agent, t.task, extraContext: board.briefFor(t));
     t.result = r;
     t.elapsedMs = sw.elapsedMilliseconds;
     if (r.ok) {
@@ -214,10 +254,29 @@ Future<void> _runOne(
     t.elapsedMs = sw.elapsedMilliseconds;
     t.status = TeamTaskStatus.failed;
     t.error = '$e';
+  } finally {
+    _runningTasks.remove(runKey);
   }
   onBoard?.call();
   onProgress?.call('${t.id} · ${t.agentName} ${t.status.name}');
 }
+
+/// 正在执行的子任务：`run_id/task_id` → 该任务自己的取消令牌。
+///
+/// 界面上的「终止」按钮按这个 key 精准停掉一个子智能体，同批其他任务不受影响。
+/// 只存在内存里：一次分派结束就注销。
+final _runningTasks = <String, CancelToken>{};
+
+/// 停掉任务板上某一个子智能体。返回 false 表示它已经结束了。
+bool cancelTeamTask(String runKey) {
+  final token = _runningTasks.remove(runKey);
+  if (token == null) return false;
+  token.cancel();
+  return true;
+}
+
+/// 这个子任务是否还在跑。
+bool isTeamTaskRunning(String runKey) => _runningTasks.containsKey(runKey);
 
 ({List<TeamTask> tasks, List<String> problems}) parseAssignments(
   List<dynamic> rows,

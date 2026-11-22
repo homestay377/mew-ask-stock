@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../agents/team_board.dart';
 import '../../ai/message.dart';
 import '../../core/i18n.dart';
 import '../../core/util.dart';
@@ -32,6 +33,7 @@ String toolLabel(String name) {
     'memory_delete' => t('删除记忆', 'Forget'),
     'web_search' => t('内置搜索', 'Built-in search'),
     'dispatch_subagents' => t('子智能体分派', 'Sub-agent dispatch'),
+    'add_team_tasks' => t('追加团队任务', 'Add team tasks'),
     'discuss_subagents' => t('子智能体讨论', 'Sub-agent discussion'),
     _ => name,
   };
@@ -46,9 +48,13 @@ IconData toolIcon(String name) {
     'clipboard' => Icons.content_paste_rounded,
     'get_device_info' => Icons.smartphone_rounded,
     'calculate' => Icons.calculate_outlined,
+    'http_request' => Icons.public_rounded,
+    'workspace_read_file' || 'workspace_list_dir' => Icons.folder_open_rounded,
+    'workspace_write_file' || 'workspace_edit_file' => Icons.edit_note_rounded,
     'plot_cartesian' || 'plot_spatial' => Icons.grid_on_rounded,
     'memory_save' || 'memory_update' || 'memory_delete' => Icons.bookmark_added_outlined,
     'dispatch_subagents' || 'discuss_subagents' => Icons.smart_toy_outlined,
+    'add_team_tasks' => Icons.playlist_add_rounded,
     _ => Icons.build_circle_outlined,
   };
 }
@@ -346,21 +352,193 @@ class _CitationChip extends StatelessWidget {
   }
 }
 
-/// 子智能体的过程与结果。
+/// 分派 / 追加 / 讨论三个工具在聊天流里的实时视图。
 ///
-/// 跑的时候显示 `meta.progress`（引擎每开工一个子智能体就推一行），跑完显示
-/// 每个子智能体的步数、耗时、token 和结论开头；完整 JSON 仍在展开区里。
-/// 只处理 dispatch_subagents / discuss_subagents，别的工具不留任何占位。
+/// 关键改动：优先读 `meta['board']`——这是 dispatch 运行期一路推上来的任务板快照，
+/// 所以任务还在跑的时候，卡片里就能看到「运行中 / 等待前置」和依赖关系，
+/// 而不是等整个分派结束才蹦出一段 JSON。
 class _SubAgentTrace extends StatelessWidget {
   const _SubAgentTrace({required this.part});
 
   final ToolPart part;
 
-  bool get _isSubAgent => part.name == 'dispatch_subagents' || part.name == 'discuss_subagents';
+  static const _names = {'dispatch_subagents', 'add_team_tasks', 'discuss_subagents'};
+
+  bool get _isSubAgent => _names.contains(part.name);
+
+  /// 实时任务板：优先 meta.board，退回已完成 output 里的 board。
+  Map<String, dynamic>? get _board {
+    final meta = part.meta?['board'];
+    if (meta is Map) {
+      final m = asMap(meta);
+      if (m['tasks'] is List) return m;
+    }
+    final raw = part.output;
+    if (raw == null) return null;
+    final j = tryJsonDecode(raw);
+    if (j is! Map) return null;
+    final b = asMap(j)['board'];
+    if (b is Map && asMap(b)['tasks'] is List) return asMap(b);
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
     if (!_isSubAgent) return const SizedBox.shrink();
+    final board = _board;
+    if (board != null) return _buildBoard(context, board);
+    return _buildLegacy(context);
+  }
+
+  // ------------------------------------------------------------ 任务板视图
+
+  Widget _buildBoard(BuildContext context, Map<String, dynamic> board) {
+    final scheme = Theme.of(context).colorScheme;
+    final style = Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant);
+    final tasks = board['tasks'] is List
+        ? [
+            for (final e in (board['tasks'] as List))
+              if (e is Map) asMap(e),
+          ]
+        : const <Map<String, dynamic>>[];
+    if (tasks.isEmpty) return const SizedBox.shrink();
+    final running = (board['running'] is num ? (board['running'] as num).toInt() : 0);
+    final pending = (board['pending'] is num ? (board['pending'] as num).toInt() : 0);
+    final title = asStr(board['title']).trim();
+    final tokIn = (board['tokens_in'] is num ? (board['tokens_in'] as num).toInt() : 0);
+    final tokOut = (board['tokens_out'] is num ? (board['tokens_out'] as num).toInt() : 0);
+    final ms = (board['elapsed_ms'] is num ? (board['elapsed_ms'] as num).toInt() : 0);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (title.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(title, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+            ),
+          for (final row in tasks) _taskRow(context, row),
+          if (running > 0 || pending > 0 || tokIn > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  if (running > 0) _badge(context, t('$running 个运行中', '$running running'), scheme.primary),
+                  if (pending > 0) _badge(context, t('$pending 个等待前置', '$pending waiting'), scheme.outline),
+                  if (tokIn > 0)
+                    Text(
+                      '↑${formatTokens(tokIn)} ↓${formatTokens(tokOut)}'
+                      '${ms > 0 ? ' · ${(ms / 1000).toStringAsFixed(1)}s' : ''}',
+                      style: style,
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _taskRow(BuildContext context, Map<String, dynamic> row) {
+    final scheme = Theme.of(context).colorScheme;
+    final style = Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant);
+    final status = asStr(row['status']);
+    final deps = row['depends_on'] is List
+        ? [for (final d in (row['depends_on'] as List)) asStr(d)].where((e) => e.isNotEmpty).toList()
+        : const <String>[];
+    final text = asStr(row['task']).replaceAll('\n', ' ').trim();
+    final short = text.length <= 56 ? text : '${text.substring(0, 56)}…';
+    final running = status == 'running';
+    final color = switch (status) {
+      'running' => scheme.primary,
+      'done' => scheme.tertiary,
+      'failed' => scheme.error,
+      _ => scheme.outline,
+    };
+
+    final icon = running
+        ? SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.8, color: color))
+        : Icon(
+            switch (status) {
+              'done' => Icons.check_circle_outline_rounded,
+              'failed' => Icons.error_outline_rounded,
+              'skipped' => Icons.remove_circle_outline_rounded,
+              _ => Icons.radio_button_unchecked,
+            },
+            size: 14,
+            color: color,
+          );
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      decoration: BoxDecoration(
+        color: running ? scheme.primaryContainer.withValues(alpha: 0.45) : null,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(padding: const EdgeInsets.only(top: 2), child: icon),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(short, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(height: 1.3)),
+                Text('${asStr(row['id'])} · ${asStr(row['agent'])}', style: style),
+                if (deps.isNotEmpty) Text('${t('依赖', 'depends on')}：${deps.join('、')}', style: style),
+                if (asStr(row['error']).isNotEmpty)
+                  Text(
+                    asStr(row['error']),
+                    style: style?.copyWith(color: scheme.error),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          _badge(context, _statusWord(status), color),
+          if (running && asStr(row['run_key']).isNotEmpty) ...[
+            const SizedBox(width: 2),
+            // 单独终止：只停这一条子任务，同批其他任务继续跑。
+            IconButton(
+              tooltip: t('终止', 'Stop'),
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              icon: Icon(Icons.stop_circle_outlined, size: 18, color: scheme.error),
+              onPressed: () => cancelTeamTask(asStr(row['run_key'])),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _statusWord(String s) => switch (s) {
+    'running' => t('运行中', 'running'),
+    'pending' => t('等待前置', 'waiting'),
+    'done' => t('已完成', 'done'),
+    'failed' => t('失败', 'failed'),
+    'skipped' => t('已跳过', 'skipped'),
+    _ => s,
+  };
+
+  Widget _badge(BuildContext context, String text, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+    decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),
+    child: Text(text, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color)),
+  );
+
+  // ------------------------------------------------------------ 旧视图兜底
+
+  Widget _buildLegacy(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final style = Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant);
     final progress = [
