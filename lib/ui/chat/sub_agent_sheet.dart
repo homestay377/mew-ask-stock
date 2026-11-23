@@ -15,8 +15,8 @@ import '../widgets/common.dart';
 /// 数据全部来自本机：成员读 `sub_agents.json`，任务板读当前会话里
 /// `dispatch_subagents` / `add_team_tasks` 的 `ToolPart.meta['board']`。
 ///
-/// 关键点：面板打开后会**按帧轮询**刷新（[_tick]），否则它只是一张打开瞬间的快照，
-/// 分派跑起来界面毫无反应——那正是之前"假界面"的根因。
+/// 关键点：任务板是 ChangeNotifier，面板用 ListenableBuilder 订阅它。
+/// 状态一变就重画，空闲时完全不动——之前的 400ms 轮询既费电又抓不住真实变化。
 Future<void> showSubAgentTeamSheet(
   BuildContext context, {
   required List<Part> Function() liveParts,
@@ -49,7 +49,6 @@ class _TeamSheet extends StatefulWidget {
 
 class _TeamSheetState extends State<_TeamSheet> {
   List<SubAgent>? _agents;
-  Timer? _tick;
   final _input = TextEditingController();
   final _focus = FocusNode();
 
@@ -63,15 +62,12 @@ class _TeamSheetState extends State<_TeamSheet> {
     SubAgentStore.load().then((v) {
       if (mounted) setState(() => _agents = v);
     });
-    // 400ms 一次：足够跟上进度，又不会把重建压得太密。
-    _tick = Timer.periodic(const Duration(milliseconds: 400), (_) {
-      if (mounted) setState(() {});
-    });
+    // 不再轮询：任务板是 ChangeNotifier，build 里用 ListenableBuilder 订阅。
+    // 空闲时完全不重建，跑起来时有变化才重画。
   }
 
   @override
   void dispose() {
-    _tick?.cancel();
     _input.dispose();
     _focus.dispose();
     super.dispose();
@@ -90,19 +86,14 @@ class _TeamSheetState extends State<_TeamSheet> {
   bool get _busy => _toolParts.any((p) => p.output == null);
 
   /// 最新一张任务板。优先用运行期 `meta.board`（实时），退回已完成的 output。
+  /// 数据源优先级：活的任务板（run_id 注册表）→ output 终态 → meta 兜底。
+  ///
+  /// 用 run_id 精确定位，不再「取最后一个」——两个会话各派一次队就会串台，
+  /// 严重时点「终止」会停掉别人会话的子任务。
   Map<String, dynamic>? get _board {
-    // 第一优先：内存里那张活的任务板。
-    //
-    // 之前只读 meta.board（序列化过的 JSON 快照），一旦这步没写进去或写失败，
-    // 面板就永远是空的。活的 TeamBoard 不依赖序列化，任务板一改这里就能看见。
-    final live = activeTeamBoard;
-    if (live != null && live.tasks.isNotEmpty) return live.toJson();
     for (final p in _toolParts.reversed) {
-      final meta = p.meta?['board'];
-      if (meta is Map) {
-        final m = asMap(meta);
-        if (m['tasks'] is List) return m;
-      }
+      final live = boardRegistry.byRunId(asStr(p.meta?['run_id']));
+      if (live != null && live.tasks.isNotEmpty) return live.toJson();
     }
     for (final p in _toolParts.reversed) {
       final raw = p.output;
@@ -112,6 +103,23 @@ class _TeamSheetState extends State<_TeamSheet> {
         final m = asMap(asMap(j)['board']);
         if (m['tasks'] is List) return m;
       }
+    }
+    for (final p in _toolParts.reversed) {
+      final meta = p.meta?['board'];
+      if (meta is Map) {
+        final m = asMap(meta);
+        if (m['tasks'] is List) return m;
+      }
+    }
+    return null;
+  }
+
+  /// 面板需要订阅的任务板（在跑的那张）。
+  TeamBoard? get _liveBoard {
+    for (final p in _toolParts.reversed) {
+      if (p.output != null) continue;
+      final b = boardRegistry.byRunId(asStr(p.meta?['run_id']));
+      if (b != null) return b;
     }
     return null;
   }
@@ -253,6 +261,15 @@ class _TeamSheetState extends State<_TeamSheet> {
 
   @override
   Widget build(BuildContext context) {
+    // 有在跑的任务板就订阅它：变化即重画，不轮询。
+    final live = _liveBoard;
+    if (live != null) {
+      return ListenableBuilder(listenable: boardRegistry, builder: (context, _) => _buildSheet(context));
+    }
+    return _buildSheet(context);
+  }
+
+  Widget _buildSheet(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final agents = _agents;
     final board = _board;

@@ -83,42 +83,9 @@ class _ToolCardState extends State<ToolCard> {
   bool _open = false;
   (String, String, bool)? _plotKey;
   _PlotResult _cachedPlot = _noPlot;
-
-  // 子智能体分派在跑的时候，卡片自己按 400ms 刷新。
-  // 只靠父级 rebuild 不够：聊天页在某些状态下不会频繁重建，卡片就"一点反应都没有"。
-  Timer? _tick;
-
-  bool get _liveTeam =>
-      widget.part.output == null && (widget.part.name == 'dispatch_subagents' || widget.part.name == 'add_team_tasks');
-
-  @override
-  void initState() {
-    super.initState();
-    _syncTick();
-  }
-
-  @override
-  void didUpdateWidget(covariant ToolCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _syncTick();
-  }
-
-  void _syncTick() {
-    if (_liveTeam) {
-      _tick ??= Timer.periodic(const Duration(milliseconds: 400), (_) {
-        if (mounted) setState(() {});
-      });
-    } else {
-      _tick?.cancel();
-      _tick = null;
-    }
-  }
-
-  @override
-  void dispose() {
-    _tick?.cancel();
-    super.dispose();
-  }
+  // 说明：这里原先有一个 400ms Timer 轮询。已删除——
+  // 任务板现在是 ChangeNotifier，_SubAgentTrace 用 ListenableBuilder 订阅，
+  // 有变化才重画，没变化完全不动。轮询既费电又抓不到真实的状态变化。
 
   _PlotResult _plotResult(ToolPart part) {
     final source = part.output;
@@ -405,33 +372,48 @@ class _SubAgentTrace extends StatelessWidget {
   bool get _isSubAgent => _names.contains(part.name);
 
   /// 实时任务板：优先 meta.board，退回已完成 output 里的 board。
+  /// 数据源优先级：output（终态，权威）→ run_id 注册表（活板）→ meta（兜底）。
+  ///
+  /// 原来 meta 在读在最前面，而 meta 是 120ms 中途快照：分派结束后卡片会
+  /// 永远显示「运行中」。这个顺序不能反。
   Map<String, dynamic>? get _board {
-    // 还没返回的分派：直接读内存里那张活的任务板。
-    // meta.board 是序列化快照，万一那步没写进去，界面就永远空白——这里兜住。
-    if (part.output == null) {
-      final live = activeTeamBoard;
-      if (live != null && live.tasks.isNotEmpty) return live.toJson();
+    final raw = part.output;
+    if (raw != null) {
+      final j = tryJsonDecode(raw);
+      if (j is Map) {
+        final b = asMap(j)['board'];
+        if (b is Map && asMap(b)['tasks'] is List) return asMap(b);
+      }
+      return null;
     }
+    final live = boardRegistry.byRunId(asStr(part.meta?['run_id']));
+    if (live != null && live.tasks.isNotEmpty) return live.toJson();
     final meta = part.meta?['board'];
     if (meta is Map) {
       final m = asMap(meta);
       if (m['tasks'] is List) return m;
     }
-    final raw = part.output;
-    if (raw == null) return null;
-    final j = tryJsonDecode(raw);
-    if (j is! Map) return null;
-    final b = asMap(j)['board'];
-    if (b is Map && asMap(b)['tasks'] is List) return asMap(b);
     return null;
   }
+
+  /// 用来监听变化的任务板（output 已有时返回 null，改由父级重建）。
+  TeamBoard? get _liveBoard => part.output == null ? boardRegistry.byRunId(asStr(part.meta?['run_id'])) : null;
 
   @override
   Widget build(BuildContext context) {
     if (!_isSubAgent) return const SizedBox.shrink();
+    // 有活的任务板就订阅注册表：状态一变就重画，不需要定时器。
+    if (_liveBoard != null) {
+      return ListenableBuilder(
+        listenable: boardRegistry,
+        builder: (context, _) {
+          final board = _board;
+          return board == null ? _buildLegacy(context) : _buildBoard(context, board);
+        },
+      );
+    }
     final board = _board;
-    if (board != null) return _buildBoard(context, board);
-    return _buildLegacy(context);
+    return board == null ? _buildLegacy(context) : _buildBoard(context, board);
   }
 
   // ------------------------------------------------------------ 任务板视图

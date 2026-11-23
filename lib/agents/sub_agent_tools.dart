@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 
 import '../core/util.dart';
 import '../tools/tool.dart';
@@ -30,15 +33,35 @@ TeamBoard? boardForSession(String? sessionKey) => _boards[sessionKey ?? '__defau
 /// 会话里是否真的有一张任务板。
 bool hasBoardForSession(String? sessionKey) => boardForSession(sessionKey) != null;
 
-/// 当前内存里最新的那张任务板（活的，不是序列化快照）。
+/// 任务板注册表：run_id → 活的任务板。
 ///
-/// 界面优先读这个：绕开 `meta.board` 的 JSON 序列化，任务板一改就能看见。
-TeamBoard? get activeTeamBoard {
-  TeamBoard? last;
-  for (final b in _boards.values) {
-    last = b;
+/// 界面靠 `ToolPart.meta['run_id']` 精确定位到自己的板。
+/// 之前用「取最后一个 value」的全局变量，会话 A 第二次分派后会返回 B 的板
+/// （LinkedHashMap 重新赋值不改插入顺序），既会显示错数据，也会停错任务。
+final boardRegistry = _BoardRegistry();
+
+class _BoardRegistry extends ChangeNotifier {
+  final Map<String, TeamBoard> _byRun = <String, TeamBoard>{};
+
+  TeamBoard? byRunId(String? runId) {
+    if (runId == null || runId.isEmpty) return null;
+    return _byRun[runId];
   }
-  return last;
+
+  void put(TeamBoard board) {
+    _byRun[board.runId] = board;
+    // 板自己变化时也要通知界面（ListenableBuilder 监听的是注册表）。
+    board.addListener(notifyListeners);
+    notifyListeners();
+  }
+
+  void remove(String runId) {
+    final b = _byRun.remove(runId);
+    b?.removeListener(notifyListeners);
+    if (b != null) notifyListeners();
+  }
+
+  int get length => _byRun.length;
 }
 
 AppTool _dispatchTool(List<SubAgent> agents) {
@@ -113,6 +136,7 @@ ${subAgentCatalog(agents)}''',
 
       final board = TeamBoard(title: title.isEmpty ? '子智能体分派' : title, tasks: parsed.tasks);
       _boards[_keyOf(ctx)] = board;
+      boardRegistry.put(board);
       await runTeamBoard(
         board,
         runner,
@@ -123,7 +147,8 @@ ${subAgentCatalog(agents)}''',
         tokenBudget: args['token_budget'] is int ? args['token_budget'] as int : null,
       );
       // 板已经收尾：从注册表摘掉，别让 SubAgentResult 全文一直挂着。
-      _boards.remove(_keyOf(ctx));
+      // 注意不要立即 remove：界面还要靠 run_id 显示终态，等它切换成 output 后再摘。
+      _scheduleBoardCleanup(board.runId);
 
       final payload = <String, dynamic>{
         'title': board.title,
@@ -346,4 +371,9 @@ ${subAgentCatalog(agents)}''',
       });
     },
   );
+}
+
+/// 延迟清掉已经收尾的板：界面需要一点时间读到终态。
+void _scheduleBoardCleanup(String runId) {
+  Timer(const Duration(minutes: 2), () => boardRegistry.remove(runId));
 }

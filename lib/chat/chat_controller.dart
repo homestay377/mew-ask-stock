@@ -636,12 +636,14 @@ class ChatController extends ChangeNotifier {
         onUpdate(List.unmodifiable(acc.parts));
       }
 
-      // 团队任务板的实时快照写进 meta.board：界面据此画「运行中 / 等待前置」。
+      // meta 里只留 run_id（几十字节）：界面靠它去注册表取活的任务板。
+      // 不再把整块板的 JSON 塞进 meta —— 那会让会话每次落库都重写几 MB。
       void pushBoard(Map<String, dynamic> board) {
         final i = acc.parts.indexWhere((p) => p is ToolPart && p.callId == call.callId);
         if (i < 0) return;
         final tp = acc.parts[i] as ToolPart;
-        acc.parts[i] = tp.copyWith(meta: {...?tp.meta, 'board': board});
+        final runId = asStr(board['run_id']);
+        acc.parts[i] = tp.copyWith(meta: {...?tp.meta, if (runId.isNotEmpty) 'run_id': runId});
         onUpdate(List.unmodifiable(acc.parts));
       }
 

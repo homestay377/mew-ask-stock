@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import '../core/net.dart';
 
 import '../core/util.dart';
@@ -122,15 +124,39 @@ const dependencyResultPerTaskLimit = 2500;
 const dependencyResultBudget = 8000;
 
 /// 一次分派对应的一张任务板。
-class TeamBoard {
+/// 一张共享任务板。
+///
+/// 它自己是 [ChangeNotifier]：状态一变就通知订阅者，界面因此不需要轮询。
+/// 这是审计建议的核心改动——把「拉」换成「推」，同时干掉全局变量。
+class TeamBoard extends ChangeNotifier {
   TeamBoard({required this.title, required this.tasks});
 
   final String title;
   final List<TeamTask> tasks;
 
-  /// 这张板的唯一标识，给「单独终止某个子智能体」做 key 用。
+  /// 这张板的唯一标识。界面靠它精确定位到自己那块板，多会话不会串台。
   final String runId = DateTime.now().microsecondsSinceEpoch.toString();
+
   bool closed = false;
+
+  /// 变化计数。UI 可以据此做缓存失效判断。
+  int revision = 0;
+
+  /// 任何状态变化后调用：通知订阅者重画。
+  void bump() {
+    revision++;
+    notifyListeners();
+  }
+
+  /// 收尾：标记结束并再通知一次。
+  void close() {
+    if (closed) return;
+    closed = true;
+    bump();
+  }
+
+  /// 已经收尾的板不再接受追加。
+  bool get finished => closed;
 
   /// 已经花掉的 token（各任务 result 的输入+输出之和）。
   int get usedTokens {
@@ -220,7 +246,12 @@ Future<void> runTeamBoard(
   int? tokenBudget,
 }) async {
   final budget = tokenBudget ?? defaultTeamTokenBudget;
-  void push() => onBoard?.call(board.toJson());
+  // 一次推送同时做两件事：给调用方快照（兼容旧路径），并通知界面重画。
+  void push() {
+    onBoard?.call(board.toJson());
+    board.bump();
+  }
+
   push();
   var guard = 0;
   while (true) {
@@ -235,7 +266,7 @@ Future<void> runTeamBoard(
           t.error = '已取消';
         }
       }
-      board.closed = true;
+      board.close();
       push();
       break;
     }
@@ -299,7 +330,7 @@ Future<void> runTeamBoard(
           t.error = '依赖无法满足（可能有环）';
         }
       }
-      board.closed = true;
+      board.close();
       push();
       break;
     }
@@ -312,6 +343,7 @@ Future<void> runTeamBoard(
           t.error = '超出 token 预算（已用 ${board.usedTokens} / $budget）';
         }
       }
+      board.close();
       push();
       break;
     }
