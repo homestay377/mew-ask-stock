@@ -234,7 +234,16 @@ List<AppTool> buildStockTools({bool enabled = true}) {
       }),
       promptHint:
           '缠论结论要给依据：中枢区间、背驰力度、买卖点位置。买卖点不是买卖建议，'
-          '要说清它成立的条件和失效的价位。',
+          '要说清它成立的条件和失效的价位。'
+          '`last.is_intraday=true` 说明最后一根还没收盘：它的价格会一直漂，'
+          '不能当收盘价、也不能当「现状」写进结论（要写就写「盘中价，收盘后需重取」）。'
+          '背驰信号带 `macd_area_prev` / `macd_area_cur`，面积比可以直接自己算，'
+          '不要再说「面积是公式内部算的无法复算」。'
+          '中枢与买卖点都带 `date`，引用时写日期，不要只写索引。'
+          '不要跨工具比较中枢「个数」：不同工具用的 K 线根数不同，个数本来就会变；'
+          '要看个数就用 `bars_used` 自己核对。'
+          '`repaints=true` 是 BACKSET 的固有行为：中枢右端会随新 K 线后延，'
+          '图上看到的结构不等于当时就能确认的结构，报告里要写明这一点。',
       execute: (args) async {
         try {
           final symbol = resolveSymbol(args['symbol']);

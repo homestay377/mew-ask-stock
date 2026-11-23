@@ -630,10 +630,16 @@ Float64List _sumImpl(Float64List x, double Function(int) kAt) {
 // -------------------------------------------------------------- 执行器
 
 class _Ctx {
-  _Ctx(this.n, this.data, this.unknown);
+  _Ctx(this.n, this.data, this.unknown, {this.symbol, this.name});
 
   final int n;
   final Map<String, Float64List> data;
+
+  /// 当前标的，供 CODELIKE 判断板块前缀。
+  final String? symbol;
+
+  /// 当前标的名称，供 NAMELIKE 判断（ST、退市整理等）。
+  final String? name;
 
   /// 收集未实现的函数名。挂在 ctx 上而不是用全局变量：
   /// 并发调用（面板 + AI 工具同时算）时全局 Set 会串数据。
@@ -888,6 +894,40 @@ Float64List _callFn(String name, List<_Node> args, _Ctx ctx) {
       return _drawLine(a, n);
     case 'DRAWNULL':
       return _nanArr(n);
+    // ---- 这 4 个以前是未实现、直接返回 NaN ----
+    //
+    // 它们只用于涨停/跌停价与板块判定（公式里都是 NODRAW），不影响笔和中枢，
+    // 但缺了会让模型看到 formulaErrors，从而对整份结构打折扣。
+    case 'CODELIKE':
+      {
+        // CODELIKE('33')：代码是否以该前缀开头（板块/市场判定）
+        final prefix = args.isNotEmpty ? args[0].text.trim().toLowerCase() : '';
+        final sym = (ctx.symbol ?? '').toLowerCase().replaceFirst(RegExp(r'^(sh|sz|bj)'), '');
+        final ok = prefix.isNotEmpty && sym.startsWith(prefix);
+        return Float64List(n)..fillRange(0, n, ok ? 1.0 : 0.0);
+      }
+    case 'NAMELIKE':
+      {
+        // NAMELIKE('ST')：名称是否包含该片段
+        final key = args.isNotEmpty ? args[0].text.trim().toUpperCase() : '';
+        final nm = (ctx.name ?? '').toUpperCase();
+        final ok = key.isNotEmpty && nm.contains(key);
+        return Float64List(n)..fillRange(0, n, ok ? 1.0 : 0.0);
+      }
+    case 'ZTPRICE':
+    case 'DTPRICE':
+      {
+        // ZTPRICE(REF(CLOSE,1), 0.1)：基准价 × (1 ± 比例)，四舍五入到分
+        final base = a0;
+        final ratio = (a1 != null && a1.isNotEmpty && !a1[0].isNaN) ? a1[0] : 0.1;
+        final up = name == 'ZTPRICE';
+        final out = Float64List(n);
+        for (var i = 0; i < n; i++) {
+          final v = base[i];
+          out[i] = v.isNaN ? double.nan : ((v * (1 + (up ? ratio : -ratio))) * 100).roundToDouble() / 100;
+        }
+        return out;
+      }
     default:
       if (_decorative.contains(name)) return _nanArr(n);
       // 未实现函数（NAMELIKE/CODELIKE/ZTPRICE/DATE/...）：返回 NaN 但不中断公式，
@@ -1000,7 +1040,7 @@ final RegExp _commentRe = RegExp(r'\{[\s\S]*?}');
 /// 执行整段公式。
 ///
 /// [ohlcv] 行情序列，键可用 `o/h/l/c/v` 或 `OPEN/HIGH/LOW/CLOSE/VOL`。
-FormulaResult runFormula(String text, Map<String, Float64List> ohlcv) {
+FormulaResult runFormula(String text, Map<String, Float64List> ohlcv, {String? symbol, String? name}) {
   final close = ohlcv['c'] ?? ohlcv['CLOSE'] ?? ohlcv['C'];
   if (close == null) {
     return FormulaResult({}, [FormulaError(0, '', '缺少收盘价序列')], 0, unknownFunctions: const []);
@@ -1011,7 +1051,7 @@ FormulaResult runFormula(String text, Map<String, Float64List> ohlcv) {
     data[e.key.toUpperCase()] = e.value;
   }
   final unknown = <String>{};
-  final ctx = _Ctx(n, data, unknown);
+  final ctx = _Ctx(n, data, unknown, symbol: symbol, name: name);
   final errors = <FormulaError>[];
 
   // ★ 先全局剥掉 {注释}（可跨行），再按 ';' 切句

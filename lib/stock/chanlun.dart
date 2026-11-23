@@ -109,6 +109,9 @@ class ChanSignal {
     required this.level,
     required this.price,
     required this.strength,
+    this.fromIdx,
+    this.areaPrev,
+    this.areaCur,
   });
 
   final int idx;
@@ -123,6 +126,17 @@ class ChanSignal {
 
   /// 力度衰减比，两位小数字符串
   final String strength;
+
+  /// 产生背驰的这一笔的起点索引（[idx] 是终点）。
+  ///
+  /// 给出来模型才能自己去核「哪一段 vs 哪一段」。
+  final int? fromIdx;
+
+  /// 前一段与前前段的同向 MACD 柱面积（已取绝对值）。
+  ///
+  /// 原来只吐 strength 字符串，模型拿不到原始面积，只能说「无法独立复算」。
+  final double? areaPrev;
+  final double? areaCur;
 }
 
 /// 三类买卖点引用的中枢摘要（价格保留 2 位）。
@@ -389,7 +403,14 @@ class Chanlun {
   /// [bars] 时间正序。**必须喂全部可用历史**，不要只喂可视窗口。
   /// [load] 只用最后 N 根算（0 = 全部；除对账外不要用）。
   /// [viewStart] 可视窗口起点。计算仍在全历史上做，只把「完全落在窗口左侧」的中枢丢掉。
-  static ChanResult analyze(List<Bar> bars, String formulaText, {int load = 0, int viewStart = 0}) {
+  static ChanResult analyze(
+    List<Bar> bars,
+    String formulaText, {
+    int load = 0,
+    int viewStart = 0,
+    String? symbol,
+    String? name,
+  }) {
     final b = (load > 0 && bars.length > load) ? bars.sublist(bars.length - load) : bars;
     final n = b.length;
     if (n == 0) {
@@ -414,7 +435,7 @@ class Chanlun {
       'c': Float64List.fromList([for (final x in b) x.c]),
       'v': Float64List.fromList([for (final x in b) x.v]),
     };
-    final res = runFormula(formulaText, ohlcv);
+    final res = runFormula(formulaText, ohlcv, symbol: symbol, name: name);
     final d = res.data;
 
     const s0 = 0;
@@ -510,6 +531,9 @@ class Chanlun {
             level: '极强',
             price: cur.toPrice,
             strength: '1.00',
+            fromIdx: cur.from,
+            areaPrev: a1,
+            areaCur: a2,
           ),
         );
         continue;
@@ -523,6 +547,9 @@ class Chanlun {
             level: lv,
             price: cur.toPrice,
             strength: _fmt2(1 - a2 / a1),
+            fromIdx: cur.from,
+            areaPrev: a1,
+            areaCur: a2,
           ),
         );
       }

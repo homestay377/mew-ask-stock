@@ -42,18 +42,47 @@ class StockAnalysis {
       'high': series.last.h,
       'low': series.last.l,
       'close': series.last.c,
+      // 盘中这根还没收盘：价格会一直漂，不能当收盘价用，也不能当「现状」写进结论。
+      'is_intraday': series.clock.closed == false,
     },
     'pens': chan.pens.length,
+    'bars_used': series.bars.length,
+    // 中枢、背驰、买卖点都带日期：只给索引，模型只能自己换算，还会猜错 ±1 个交易日。
     'boxes': [
-      for (final b in chan.boxes) {'tag': b.tag, 'start': b.s, 'end': b.e, 'zg': r2(b.zg), 'zd': r2(b.zd)},
+      for (final b in chan.boxes)
+        {
+          'tag': b.tag,
+          'start': b.s,
+          'end': b.e,
+          'start_date': _dateAt(series, b.s),
+          'end_date': _dateAt(series, b.e),
+          'zg': r2(b.zg),
+          'zd': r2(b.zd),
+        },
     ],
     'signals': [
       for (final s in chan.signals)
-        {'idx': s.idx, 'type': s.type, 'label': s.label, 'price': r2(s.price), 'strength': s.strength},
+        {
+          'idx': s.idx,
+          'date': _dateAt(series, s.idx),
+          'type': s.type,
+          'label': s.label,
+          'price': r2(s.price),
+          'strength': s.strength,
+          // 原始面积一起给：模型才能自己核「哪一段 vs 哪一段」，
+          // 而不是只能说「面积是公式内部算的，无法复算」。
+          if (s.fromIdx != null) 'from_idx': s.fromIdx,
+          if (s.areaPrev != null) 'macd_area_prev': r2(s.areaPrev),
+          if (s.areaCur != null) 'macd_area_cur': r2(s.areaCur),
+        },
     ],
     'points': [
-      for (final p in chan.points) {'idx': p.idx, 'label': p.label, 'price': r2(p.price), 'reason': p.reason},
+      for (final p in chan.points)
+        {'idx': p.idx, 'date': _dateAt(series, p.idx), 'label': p.label, 'price': r2(p.price), 'reason': p.reason},
     ],
+    // BACKSET 导致中枢右端会随新数据后延；显式告诉模型，别把它当成终稿。
+    'repaints': true,
+    'repaints_note': '中枢右端会随新 K 线后延（公式用了 BACKSET），图上看到的结构不等于当时就能确认的结构',
     'boxPosition': chan.stats.boxPosition,
     'formulaErrors': chan.errors.length,
     'elapsedMs': elapsedMs,
@@ -79,7 +108,7 @@ class StockAnalyzer {
   }) async {
     final sw = Stopwatch()..start();
     final series = await source.kline(symbol, period: period, count: count);
-    final chan = Chanlun.analyze(series.bars, formula, viewStart: viewStart);
+    final chan = Chanlun.analyze(series.bars, formula, viewStart: viewStart, symbol: series.symbol, name: series.name);
     sw.stop();
     return StockAnalysis(
       series: series,
@@ -177,4 +206,11 @@ class StockAnalyzer {
     'm5' => '5 分钟',
     _ => p,
   };
+}
+
+/// 取第 [i] 根 K 线的日期；越界返回 null。
+String? _dateAt(KlineSeries s, int i) {
+  if (i < 0 || i >= s.bars.length) return null;
+  final bar = s.bars[i];
+  return bar.t.isEmpty ? null : bar.t;
 }
