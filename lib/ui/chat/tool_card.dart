@@ -452,6 +452,7 @@ class _SubAgentTrace extends StatelessWidget {
         : const <String>[];
     final text = asStr(row['task']).replaceAll('\n', ' ').trim();
     final short = text.length <= 56 ? text : '${text.substring(0, 56)}…';
+    final running = status == 'running';
     final rawOutput = asStr(row['output']).trim();
     final liveText = running ? rawOutput.replaceAll(RegExp(r'\s+'), ' ') : '';
     final steps = row['steps'];
@@ -468,7 +469,6 @@ class _SubAgentTrace extends StatelessWidget {
         if (stepLines.length >= 2) break;
       }
     }
-    final running = status == 'running';
     final color = switch (status) {
       'running' => scheme.primary,
       'done' => scheme.tertiary,

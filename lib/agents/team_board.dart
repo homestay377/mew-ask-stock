@@ -43,9 +43,13 @@ class TeamTask {
   /// 收下 [SubAgentRunner.onLive] 推来的快照。
   void applyLive(Map<String, dynamic> snap) {
     final st = asStr(snap['status']);
-    if (st.isNotEmpty) liveStatus = st;
+    if (st.isNotEmpty) {
+      liveStatus = st;
+    }
     final out = asStr(snap['output']);
-    if (out.isNotEmpty) liveOutput = out;
+    if (out.isNotEmpty) {
+      liveOutput = out;
+    }
     final steps = snap['steps'];
     if (steps is List)
       liveSteps = [
