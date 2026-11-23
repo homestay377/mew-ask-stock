@@ -147,3 +147,68 @@ List<ModeInjection> defaultStockModes() => [
         '不要一只一只地写完再说「综合来看」——那是罗列，不是对比。',
   ),
 ];
+
+/// 预置的股票分析快捷短语。
+///
+/// 只装一次（和世界书共用 `.stock_knowledge_seeded` 标记）：
+/// 用户删掉之后不会再被加回来。
+///
+/// 每条都写清「问什么 + 要什么输出」，避免模型只回一句「偏强」。
+List<QuickMessage> defaultStockQuickMessages() => [
+  QuickMessage(
+    id: 'qm-stock-1',
+    title: '日线结构',
+    content:
+        '用 analyze_chan 看当前这只股票的日线结构：笔、中枢区间、有无背驰、买卖点位置。'
+        '按【结论】【证据】【未完成】三段写，证据要带中枢区间与日期。',
+  ),
+  QuickMessage(
+    id: 'qm-stock-2',
+    title: '多周期共振',
+    content:
+        '用 stock_levels 看当前股票的日/周/60分/30分四个级别：各自的趋势方向、是否在中枢上方、'
+        '数据根数够不够。明确说出哪两个级别方向相反（如果有）。',
+  ),
+  QuickMessage(
+    id: 'qm-stock-3',
+    title: '位置判断',
+    content:
+        '这只票现在的位置该不该参与？给出：关键支撑与压力（写清怎么算的）、'
+        '什么条件下才考虑加仓、什么条件下减仓、方案在哪个价位失效。不要给收益承诺。',
+  ),
+  QuickMessage(
+    id: 'qm-stock-4',
+    title: '量价配合',
+    content:
+        '看最近的量价关系：是放量突破还是缩量反抽？量能与价格是否背离？'
+        '把判断落到具体几根 K 线上，不要只说「量能配合一般」。',
+  ),
+  QuickMessage(
+    id: 'qm-stock-5',
+    title: '团队分析',
+    content:
+        '用智能体团队分析当前这只股票：行情侦察取数、结构审查复核、策略方案给条件，'
+        '数据核验查新鲜度。最后你自己整合结论，不要原样转述子智能体的输出。',
+  ),
+  QuickMessage(
+    id: 'qm-stock-6',
+    title: '自选扫描',
+    content:
+        '用 scan_stocks 扫一遍我的自选，按「结构健康度」排序：'
+        '哪些还在中枢上方、哪些已经破位、哪些有背驰。给出前 5 个要留意的。',
+  ),
+  QuickMessage(
+    id: 'qm-stock-7',
+    title: '基本面快查',
+    content:
+        '用 get_fundamental 查当前股票的基本面：市盈率、市值、每股收益。'
+        '取不到的字段明确写「取不到」，不要用估计值填充。',
+  ),
+  QuickMessage(
+    id: 'qm-stock-8',
+    title: '数据核验',
+    content:
+        '核一下刚才那份分析的证据：数据是哪天拉的、是否跨了交易日、'
+        '有没有拿盘中价当收盘价、不同周期结论是否互相矛盾。发现问题指出来。',
+  ),
+];

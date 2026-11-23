@@ -1023,11 +1023,12 @@ class _Welcome extends StatelessWidget {
     final store = context.watch<SettingsStore>();
     final a = store.value.currentAssistant;
     final hasModel = store.value.allModels().isNotEmpty;
+    // 这是「问股」App，欢迎页给的是股票分析的起手式，不是通用示例。
     final ideas = [
-      (Icons.lightbulb_outline_rounded, t('帮我想 5 个周末活动', 'Give me 5 weekend ideas')),
-      (Icons.translate_rounded, t('把这段话翻译成英文：', 'Translate this into Chinese: ')),
-      (Icons.code_rounded, t('用 Dart 写一个防抖函数', 'Write a debounce function in Dart')),
-      (Icons.school_outlined, t('用通俗的话解释量子纠缠', 'Explain quantum entanglement simply')),
+      (Icons.candlestick_chart_rounded, t('看看当前这只股票的日线结构', 'Review the daily structure of the chart symbol')),
+      (Icons.groups_2_outlined, t('用智能体团队分析这只票的多周期共振', 'Have the team check multi-timeframe alignment')),
+      (Icons.insights_outlined, t('这只票现在的位置该不该参与', 'Is this a good entry right now')),
+      (Icons.travel_explore_rounded, t('今天市场的热点板块和资金流向', 'What is leading the market today')),
     ];
     return LayoutBuilder(
       builder: (context, box) => SingleChildScrollView(

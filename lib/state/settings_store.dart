@@ -85,7 +85,14 @@ class SettingsStore extends ChangeNotifier {
       for (final m in defaultStockModes())
         if (!existingModes.contains(m.id)) m,
     ];
-    if (newBooks.isEmpty && newModes.isEmpty) return s;
+    // 顺带补上股票分析快捷短语（同一标记控制，只装一次）。
+    final existingQuick = {for (final q in s.quickMessages) q.id};
+    final newQuick = [
+      for (final q in defaultStockQuickMessages())
+        if (!existingQuick.contains(q.id)) q,
+    ];
+
+    if (newBooks.isEmpty && newModes.isEmpty && newQuick.isEmpty) return s;
 
     final books = [...s.lorebooks, ...newBooks];
 
@@ -100,7 +107,12 @@ class SettingsStore extends ChangeNotifier {
           a,
     ];
 
-    return s.copyWith(lorebooks: books, modes: [...s.modes, ...newModes], assistants: assistants);
+    return s.copyWith(
+      lorebooks: books,
+      modes: [...s.modes, ...newModes],
+      assistants: assistants,
+      quickMessages: [...s.quickMessages, ...newQuick],
+    );
   }
 
   void update(AppSettings Function(AppSettings s) fn) {

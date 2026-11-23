@@ -11,6 +11,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import '../stock/chanlun.dart';
 import '../stock/chart_shapes.dart';
 import '../stock/data_quality.dart';
+import '../stock/market_source.dart';
 import '../stock/stock_bridge.dart';
 import '../stock/shape_store.dart';
 import '../stock/stock_analyzer.dart';
@@ -72,7 +73,43 @@ List<AppTool> buildStockTools({bool enabled = true}) {
 
   Future<StockAnalyzer> analyzer() async => StockAnalyzer(source: source, formula: await _formula());
 
+  final market = MarketSource();
+
   return [
+    AppTool(
+      name: 'market_overview',
+      displayName: '大盘与板块',
+      description: '''看今天的市场环境：三大指数涨跌 + 板块涨幅榜/跌幅榜（带主力净流入）。
+这是市场层数据，不是个股数据；要判断某只票的强弱仍需 stock_kline / analyze_chan。
+
+明确边界：只有指数与板块，**没有**涨停家数、连板梯队、赚钱效应、新闻资讯——这些数据源当前取不到，
+不要用板块涨幅反推「今天有几个涨停」。板块判断必须写清是从哪个榜推出来的。''',
+      parameters: objectSchema({
+        'direction': strProp('榜单方向', enumValues: ['up', 'down']),
+        'limit': intProp('每个榜返回多少条，默认 8，上限 20'),
+      }),
+      promptHint:
+          '回答市场问题时，指数与板块数字必须来自这个工具，不要凭印象说「今天普涨」。'
+          '每个数字都带 as_of，要注明是盘中还是收盘后。'
+          '取不到就说取不到（error 字段会说明是否被限流），绝对不要用板块涨幅去反推涨停家数这类指标。',
+      execute: (args) async {
+        final dir = asStr(args['direction']).trim().toLowerCase() == 'down' ? false : true;
+        final limit = (args['limit'] is int ? args['limit'] as int : 8).clamp(1, 20).toInt();
+        final idx = await market.indexSnapshot();
+        final top = await market.sectors(descending: dir, limit: limit);
+        return jsonEncode({
+          'indices': idx.items,
+          if (idx.error != null) 'indices_error': idx.error,
+          'sectors_title': dir ? '涨幅榜' : '跌幅榜',
+          'sectors': top.items,
+          'sector_total': top.total,
+          if (top.error != null) 'sectors_error': top.error,
+          'source': '东方财富 push2（免费接口，无 SLA，可能限流）',
+          'unavailable': ['涨停家数', '连板梯队', '赚钱效应', '新闻资讯'],
+          if (idx.error != null || top.error != null) 'note': '有接口返回失败，说明缺的那部分；不要把缺失当成「没有」。',
+        });
+      },
+    ),
     AppTool(
       name: 'chart_context',
       displayName: '当前图表',

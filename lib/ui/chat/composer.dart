@@ -346,6 +346,15 @@ class ComposerState extends State<Composer> {
                           tooltip: _toolsOpen ? t('收起工具', 'Close tools') : t('展开工具', 'Open tools'),
                         ),
                         const SizedBox(width: 2),
+                        // 快捷短语直达：原来只有「+」→ 扩展 → 快捷 三层，
+                        // 常用分析短句要翻半天才够得着。
+                        if (widget.onOpenExtensions != null)
+                          _RoundIcon(
+                            icon: Icons.short_text_rounded,
+                            onTap: widget.onOpenExtensions!,
+                            tooltip: t('快捷短语', 'Quick messages'),
+                          ),
+                        if (widget.onOpenExtensions != null) const SizedBox(width: 2),
                         _RoundIcon(
                           icon: Icons.travel_explore_rounded,
                           active: widget.searchEnabled,
