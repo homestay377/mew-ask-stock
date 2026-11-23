@@ -576,7 +576,7 @@ class _SubAgentTrace extends StatelessWidget {
     if (j is Map) {
       final mm = asMap(j);
       for (final k in const ['answer', 'output', 'note', 'error']) {
-        final v = asStr(mm[k]).replaceAll('\s+', ' ').trim();
+        final v = asStr(mm[k]).replaceAll(RegExp(r'\s+'), ' ').trim();
         if (v.isNotEmpty) {
           detail = v.length <= 40 ? v : '${v.substring(0, 40)}…';
           break;

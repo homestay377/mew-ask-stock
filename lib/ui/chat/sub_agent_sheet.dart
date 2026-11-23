@@ -684,7 +684,8 @@ class _TeamSheetState extends State<_TeamSheet> {
               child: TextField(
                 controller: _input,
                 focusNode: _focus,
-                enabled: canSend,
+                // 追问进行中先禁掉输入，避免连发把通道压满。
+                enabled: canSend && !_asking,
                 textInputAction: TextInputAction.send,
                 decoration: InputDecoration(
                   isDense: true,
