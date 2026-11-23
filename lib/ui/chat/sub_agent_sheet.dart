@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../agents/sub_agent.dart';
 import '../../agents/sub_agent_store.dart';
 import '../../agents/sub_agent_tools.dart';
+import '../../agents/team_board.dart';
 import '../../ai/message.dart';
 import '../../core/i18n.dart';
 import '../../core/util.dart';
