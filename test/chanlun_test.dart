@@ -126,11 +126,36 @@ void main() {
     }
   });
 
-  test('公式包含未来函数，必须记录下来（不静默）', () {
-    final r = Chanlun.analyze(bars, formula);
-    // 真实公式里 NAMELIKE/CODELIKE/ZTPRICE/DTPRICE 未实现
-    expect(r.unknownFunctions, isNotEmpty, reason: '未实现函数必须上报，否则公式写错了也看不出来');
-    expect(r.unknownFunctions, contains('NAMELIKE'));
+  test('NAMELIKE/CODELIKE/ZTPRICE/DTPRICE 已实现，不再算未知函数', () {
+    final r = Chanlun.analyze(bars, formula, symbol: 'sz300274', name: '阳光电源');
+    // 这 4 个以前未实现、会进 unknownFunctions，导致模型看到 formulaErrors 后
+    // 对整份结构打折扣。现在实现了，就不该再报。
+    for (final fn in const ['NAMELIKE', 'CODELIKE', 'ZTPRICE', 'DTPRICE']) {
+      expect(r.unknownFunctions, isNot(contains(fn)), reason: '$fn 已经实现，不该再上报');
+    }
+  });
+
+  test('CODELIKE/NAMELIKE 按标的判定，ZTPRICE 算涨停价', () {
+    final small = [for (var i = 0; i < 30; i++) Bar(10.0, 11.0, 9.0, 10.0 + i, v: 100, t: 'd$i')];
+    Map<String, Float64List> bars4(List<Bar> b) => {
+      'o': Float64List.fromList([for (final x in b) x.o]),
+      'h': Float64List.fromList([for (final x in b) x.h]),
+      'l': Float64List.fromList([for (final x in b) x.l]),
+      'c': Float64List.fromList([for (final x in b) x.c]),
+      'v': Float64List.fromList([for (final x in b) x.v]),
+    };
+    final r = runFormula(
+      'A:=CODELIKE(\'300\');\nB:=NAMELIKE(\'ST\');\nC:=ZTPRICE(REF(CLOSE,1),0.1);',
+      bars4(small),
+      symbol: 'sz300274',
+      name: '阳光电源',
+    );
+    expect(r.data['A']![0], 1.0, reason: '300274 以 300 开头');
+    expect(r.data['B']![0], 0.0, reason: '名字里没有 ST');
+    // REF(CLOSE,1) 对最后一根取的是倒数第二根的收盘价
+    final prev = small[small.length - 2].c;
+    final expected = (prev * 1.1 * 100).roundToDouble() / 100;
+    expect(r.data['C']!.last, closeTo(expected, 1e-9), reason: '涨停价 = 前收 x 1.1，四舍五入到分');
   });
 
   test('未知函数不中断整条公式，但会被记录', () {
