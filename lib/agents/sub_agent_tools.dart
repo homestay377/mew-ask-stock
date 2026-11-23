@@ -120,6 +120,7 @@ ${subAgentCatalog(agents)}''',
         onProgress: ctx.onProgress,
         onBoard: ctx.onBoardUpdate,
         globalCancel: ctx.cancel,
+        tokenBudget: args['token_budget'] is int ? args['token_budget'] as int : null,
       );
 
       final payload = <String, dynamic>{
@@ -322,6 +323,7 @@ ${subAgentCatalog(agents)}''',
         onProgress: ctx.onProgress,
         onBoard: ctx.onBoardUpdate,
         globalCancel: ctx.cancel,
+        tokenBudget: null,
       );
       return jsonEncode({
         'ok': parsed.tasks.every((t) => t.status == TeamTaskStatus.done),

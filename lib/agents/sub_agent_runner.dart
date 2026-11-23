@@ -179,7 +179,18 @@ class SubAgentRunner {
   /// 一个子智能体最多申请几次额外工具。
   static const maxCapabilityRequests = 3;
 
+  /// 默认单工具超时。
   static const _toolTimeout = Duration(minutes: 3);
+
+  /// 按工具给不同超时。
+  ///
+  /// 原来一刀切 3 分钟：`scan_stocks`（扫全市场）、`stock_levels`（多周期并发取数）、
+  /// `http_request`（慢站点）经常超时直接被判失败，而分派本身却有 15 分钟。
+  static Duration timeoutForTool(String name) => switch (name) {
+    'scan_stocks' || 'stock_levels' || 'http_request' => const Duration(minutes: 8),
+    'analyze_chan' || 'stock_kline' || 'get_fundamental' => const Duration(minutes: 5),
+    _ => _toolTimeout,
+  };
   static const _stepOutputLimit = 4000;
 
   /// 推理片段与正文片段各自保留多少字进步骤列表。
@@ -343,7 +354,7 @@ class SubAgentRunner {
           isError = true;
         } else {
           try {
-            out = await tool.execute(call.inputJson).timeout(_toolTimeout);
+            out = await tool.execute(call.inputJson).timeout(timeoutForTool(call.name));
           } catch (e) {
             out = jsonEncode({'error': '$e'});
             isError = true;

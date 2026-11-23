@@ -22,18 +22,22 @@ Future<void> showSubAgentTeamSheet(
   required List<Part> Function() liveParts,
   Future<void> Function(String text)? onSubmit,
   Future<String> Function(String text)? onAskTeam,
+  int mainTokens = 0,
 }) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (_) => _TeamSheet(liveParts: liveParts, onSubmit: onSubmit, onAskTeam: onAskTeam),
+    builder: (_) => _TeamSheet(liveParts: liveParts, onSubmit: onSubmit, onAskTeam: onAskTeam, mainTokens: mainTokens),
   );
 }
 
 class _TeamSheet extends StatefulWidget {
-  const _TeamSheet({required this.liveParts, this.onSubmit, this.onAskTeam});
+  const _TeamSheet({required this.liveParts, this.onSubmit, this.onAskTeam, this.mainTokens = 0});
   final List<Part> Function() liveParts;
+
+  /// 这段对话里主模型自己花掉的 token（不含子智能体）。
+  final int mainTokens;
   final Future<void> Function(String text)? onSubmit;
 
   /// 团队运行中向 lead 追问（独立通道，不排队等主生成循环）。
@@ -407,6 +411,7 @@ class _TeamSheetState extends State<_TeamSheet> {
           return Text(
             '${t('本次合计 ', 'total ')}↑${formatTokens(tot.tokIn)} ↓${formatTokens(tot.tokOut)}'
             ' · ${formatTokens(tot.tokIn + tot.tokOut)} tokens'
+            '${widget.mainTokens > 0 ? ' · ${t('主对话', 'chat')} +${formatTokens(widget.mainTokens)}' : ''}'
             '${tot.ms > 0 ? ' · ${_duration(tot.ms)}' : ''}',
             style: style,
           );
@@ -761,6 +766,80 @@ class _TeamSheetState extends State<_TeamSheet> {
     await submit(text);
   }
 
+  Widget _stepRow(BuildContext context, Map<String, dynamic> step) {
+    final scheme = Theme.of(context).colorScheme;
+    final type = asStr(step['type']);
+    final tool = asStr(step['tool']);
+    final ok = step['ok'] == true;
+    final ms = step['ms'] is num ? (step['ms'] as num).toInt() : 0;
+    final text = asStr(step['output']).replaceAll(RegExp(r'\s+'), ' ').trim();
+
+    if (type == 'reasoning') {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.psychology_outlined, size: 14, color: scheme.tertiary),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                text.isEmpty ? t('（思考）', '(thinking)') : text,
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: scheme.onSurfaceVariant, fontStyle: FontStyle.italic, height: 1.35),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (type == 'text') {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(text, style: const TextStyle(height: 1.35)),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            ok ? Icons.check_circle_outline_rounded : Icons.error_outline_rounded,
+            size: 14,
+            color: ok ? scheme.primary : scheme.error,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: tool,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  if (ms > 0)
+                    TextSpan(
+                      text: '  ${formatDuration(ms)}',
+                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    ),
+                  if (text.isNotEmpty)
+                    TextSpan(
+                      text: '\n$text',
+                      style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 11),
+                    ),
+                ],
+              ),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(height: 1.3),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showOutput(BuildContext context, Map<String, dynamic> task) {
     final out = asStr(task['output']);
     final error = asStr(task['error']);
@@ -791,9 +870,21 @@ class _TeamSheetState extends State<_TeamSheet> {
             const SizedBox(height: 12),
             Text(asStr(task['task'])),
             const SizedBox(height: 16),
+            // 步骤结构化：推理 / 正文 / 工具分色，不再是整段 JSON。
+            if (steps is List && steps.isNotEmpty) ...[
+              Text(t('过程', 'Trace'), style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
+              for (final e in steps)
+                if (e is Map) _stepRow(context, asMap(e)),
+              const SizedBox(height: 12),
+            ],
             if (error.isNotEmpty) Text(error, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-            if (out.isNotEmpty) SelectableText(out),
-            if (out.isEmpty && error.isEmpty) const Text('（还没有产出）'),
+            if (out.isNotEmpty) ...[
+              Text(t('产出', 'Output'), style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 6),
+              SelectableText(out),
+            ],
+            if (out.isEmpty && error.isEmpty && (steps is! List || steps.isEmpty)) Text(t('（还没有产出）', '(nothing yet)')),
           ],
         ),
       ),

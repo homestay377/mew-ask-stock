@@ -76,6 +76,19 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// Space after the last message: the dock plus the old breathing room.
   double get _listEndPadding => _dockInset(_dock.value) + 12;
 
+  /// 整段对话里主模型自己花掉的 token（不含子智能体）。
+  ///
+  /// 面板原来只显示「分派」的合计，用户看不到这段对话总共花了多少。
+  int _conversationTokens(Conversation conv) {
+    var sum = 0;
+    for (final n in conv.nodes) {
+      final u = n.current.usage;
+      if (u == null) continue;
+      sum += u.input + u.output;
+    }
+    return sum;
+  }
+
   /// 当前会话里是否有正在跑的分派/追加（工具还没返回）。
   bool _teamRunning(Conversation conv) {
     for (final n in conv.nodes) {
@@ -592,6 +605,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                           liveParts: () => [for (final n in c.conversation.nodes) ...n.current.parts],
                           onSubmit: (text) => c.send([TextPart(text)]),
                           onAskTeam: (text) => c.askTeam(question: text),
+                          mainTokens: _conversationTokens(conv),
                         ),
                       ),
                     Composer(
@@ -725,6 +739,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             liveParts: () => [for (final n in c.conversation.nodes) ...n.current.parts],
             onSubmit: (text) => c.send([TextPart(text)]),
             onAskTeam: (text) => c.askTeam(question: text),
+            mainTokens: _conversationTokens(conv),
           ),
         ),
         IconButton(

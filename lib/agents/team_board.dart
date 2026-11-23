@@ -24,6 +24,9 @@ class TeamTask {
 
   TeamTaskStatus status = TeamTaskStatus.pending;
   SubAgentResult? result;
+
+  /// 已经重试过几次。
+  int retries = 0;
   String? error;
   int elapsedMs = 0;
 
@@ -103,6 +106,18 @@ const boardLiveOutputLimit = 2000;
 const boardResultOutputLimit = 2000;
 
 /// 依赖产出注入下游任务时的预算（对齐清水 1.4.2 的数字）。
+/// 同时最多几个子任务在跑。
+///
+/// 原来 `Future.wait` 不限流，6 条任务会同时打同一个供应商，很容易 429，
+/// 然后整批一起失败。限到 3 个既能把时间压下来，又不会被限流打死。
+const maxConcurrentTasks = 3;
+
+/// 单个子任务最多重试几次（每次换一份更短的提示）。
+const maxTaskRetries = 1;
+
+/// 一次团队运行的 token 总预算（输入+输出合计）。超出后不再派新任务。
+const defaultTeamTokenBudget = 200000;
+
 const dependencyResultPerTaskLimit = 2500;
 const dependencyResultBudget = 8000;
 
@@ -116,6 +131,17 @@ class TeamBoard {
   /// 这张板的唯一标识，给「单独终止某个子智能体」做 key 用。
   final String runId = DateTime.now().microsecondsSinceEpoch.toString();
   bool closed = false;
+
+  /// 已经花掉的 token（各任务 result 的输入+输出之和）。
+  int get usedTokens {
+    var sum = 0;
+    for (final t in tasks) {
+      final r = t.result;
+      if (r == null) continue;
+      sum += r.usage.input + r.usage.output;
+    }
+    return sum;
+  }
 
   TeamTask? byId(String id) {
     for (final t in tasks) {
@@ -191,7 +217,9 @@ Future<void> runTeamBoard(
   void Function(String)? onProgress,
   void Function(Map<String, dynamic>)? onBoard,
   CancelToken? globalCancel,
+  int? tokenBudget,
 }) async {
+  final budget = tokenBudget ?? defaultTeamTokenBudget;
   void push() => onBoard?.call(board.toJson());
   push();
   var guard = 0;
@@ -261,15 +289,35 @@ Future<void> runTeamBoard(
       break;
     }
 
+    // 预算检查：超了就收尾，别把剩下的任务也烧掉。
+    if (budget > 0 && board.usedTokens >= budget) {
+      for (final t in board.tasks) {
+        if (t.status == TeamTaskStatus.pending) {
+          t.status = TeamTaskStatus.skipped;
+          t.error = '超出 token 预算（已用 ${board.usedTokens} / $budget）';
+        }
+      }
+      push();
+      break;
+    }
+
     // 先把这一批全部标成 running 推出去，界面才能马上看到「谁在跑」。
     for (final t in ready) {
       t.status = TeamTaskStatus.running;
     }
     push();
-    await Future.wait([
-      for (final t in ready)
-        _runOne(t, board, runner, onProgress: onProgress, onBoard: push, globalCancel: globalCancel),
-    ]);
+    // 限流执行：同时最多 maxConcurrentTasks 个，其余排队。
+    var cursor = 0;
+    Future<void> worker() async {
+      while (true) {
+        if (isCancelled()) return;
+        final i = cursor++;
+        if (i >= ready.length) return;
+        await _runOne(ready[i], board, runner, onProgress: onProgress, onBoard: push, globalCancel: globalCancel);
+      }
+    }
+
+    await Future.wait([for (var i = 0; i < maxConcurrentTasks && i < ready.length; i++) worker()]);
   }
 }
 
@@ -311,7 +359,15 @@ Future<void> _runOne(
   );
   final sw = Stopwatch()..start();
   try {
-    final r = await taskRunner.run(agent, t.task, extraContext: board.briefFor(t));
+    var r = await taskRunner.run(agent, t.task, extraContext: board.briefFor(t));
+    // 失败自动重试一次：换一份更短的提示，只求结论。
+    // 长任务里一次模型抽风就整条任务报废，太浪费了。
+    if (!r.ok && t.retries < maxTaskRetries && !local.isCancelled) {
+      t.retries++;
+      onProgress?.call('${t.id} · ${t.agentName} 重试');
+      onBoard?.call();
+      r = await taskRunner.run(agent, _retryTask(t.task), extraContext: board.briefFor(t));
+    }
     t.result = r;
     t.elapsedMs = sw.elapsedMilliseconds;
     if (r.ok) {
@@ -332,6 +388,12 @@ Future<void> _runOne(
 }
 
 String _clipText(String s, int max) => s.length <= max ? s : '${s.substring(0, max)}…';
+
+/// 重试时用更短的任务描述：去掉可能让它又跑偏的长上下文，只要结论。
+String _retryTask(String task) {
+  final head = task.length <= 900 ? task : '${task.substring(0, 900)}…';
+  return '$head\n\n（上一次没跑通。这次只要结论：直接给判断和关键数字，不要再试点、不要长篇复述过程。）';
+}
 
 /// 只保留最近 [boardStepKeep] 步，且每步输出截断到 [boardStepOutputLimit]。
 List<Map<String, dynamic>> _tailSteps(List<Map<String, dynamic>> steps) {
