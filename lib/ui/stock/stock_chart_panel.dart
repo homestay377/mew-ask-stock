@@ -171,6 +171,23 @@ class StockPanelState extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// 冷启动时按代码补名字。
+  ///
+  /// 只给收起态显示用；失败就算了（显示代码也比显示上一只的名字强）。
+  Future<void> _fetchName(String symbol) async {
+    try {
+      final quote = await sharedStockSource.quote(symbol);
+      final n = quote.name.trim();
+      if (n == null || n.isEmpty) return;
+      if (_symbol != symbol) return;
+      _name = n;
+      notifyListeners();
+      unawaited(_persist());
+    } catch (_) {
+      // 取不到就继续显示代码
+    }
+  }
+
   /// 启动时恢复上次看的标的。没有记录时保持默认（上证指数）。
   Future<void> restore() async {
     try {
@@ -187,6 +204,15 @@ class StockPanelState extends ChangeNotifier {
       // 文件可能被改坏或来自旧版本：只接受已知周期，否则保持默认
       if (per != null && _periodLabels.containsKey(per)) _period = per;
       if (nm != null && nm.isNotEmpty) _name = nm;
+      // 老版本存的文件里没有 name：补一次，否则收起态永远显示代码。
+      if (_name == null || _name!.isEmpty) {
+        final fromWatch = WatchlistStore.instance.nameOf(_symbol);
+        if (fromWatch != null && fromWatch.isNotEmpty) {
+          _name = fromWatch;
+        } else {
+          unawaited(_fetchName(_symbol));
+        }
+      }
       // 高度只接受合理区间：文件被改坏时不要把面板撑成 0 或整屏
       final h = j['height'];
       if (h is num && h.isFinite) {

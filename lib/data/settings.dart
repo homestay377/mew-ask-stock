@@ -238,6 +238,7 @@ class AppSettings {
     this.lastBackupAt,
     this.lastChatModelId,
     this.lastReasoning,
+    this.lastExtensionTab,
   });
 
   final ThemeModePref themeMode;
@@ -289,6 +290,12 @@ class AppSettings {
   /// them; picking a default in settings or on an assistant clears them.
   final String? lastChatModelId;
   final ReasoningLevel? lastReasoning;
+
+  /// 上次在「+ → 扩展」里停留的页签（quick / modes / lorebooks / memory）。
+  ///
+  /// 存下来是因为默认逻辑会跳回「第一个有内容的页签」，
+  /// 用户每次点开都要重新选一次，很烦。
+  final String? lastExtensionTab;
 
   Assistant get currentAssistant =>
       assistants.firstWhere((a) => a.id == currentAssistantId, orElse: () => assistants.first);
@@ -355,6 +362,7 @@ class AppSettings {
     List<Lorebook>? lorebooks,
     List<ModeInjection>? modes,
     List<QuickMessage>? quickMessages,
+    String? lastExtensionTab,
     List<ChatFolder>? chatFolders,
     DisplaySettings? display,
     TtsSettings? tts,
@@ -404,6 +412,7 @@ class AppSettings {
     lorebooks: lorebooks ?? this.lorebooks,
     modes: modes ?? this.modes,
     quickMessages: quickMessages ?? this.quickMessages,
+    lastExtensionTab: lastExtensionTab ?? this.lastExtensionTab,
     chatFolders: chatFolders ?? this.chatFolders,
     display: display ?? this.display,
     tts: tts ?? this.tts,
@@ -474,6 +483,7 @@ class AppSettings {
       lorebooks: mapList(j['lorebooks'], Lorebook.fromJson),
       modes: j['modes'] == null ? defaultModes() : mapList(j['modes'], ModeInjection.fromJson),
       quickMessages: mapList(j['quickMessages'], QuickMessage.fromJson),
+      lastExtensionTab: asStrOrNull(j['lastExtensionTab']),
       chatFolders: mapList(j['chatFolders'], ChatFolder.fromJson),
       display: DisplaySettings.fromJson(asMap(j['display'])),
       tts: TtsSettings.fromJson(asMap(j['tts'])),
@@ -528,6 +538,7 @@ class AppSettings {
     'lorebooks': lorebooks.map((e) => e.toJson()).toList(),
     'modes': modes.map((e) => e.toJson()).toList(),
     'quickMessages': quickMessages.map((e) => e.toJson()).toList(),
+    if (lastExtensionTab != null) 'lastExtensionTab': lastExtensionTab,
     'chatFolders': chatFolders.map((e) => e.toJson()).toList(),
     'display': display.toJson(),
     'tts': tts.toJson(),

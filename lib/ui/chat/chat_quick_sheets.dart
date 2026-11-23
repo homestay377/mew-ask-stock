@@ -634,7 +634,18 @@ class ExtensionsQuickSheet extends StatefulWidget {
 }
 
 class _ExtensionsQuickSheetState extends State<ExtensionsQuickSheet> {
-  late ExtensionTab _tab = widget.initialTab ?? _firstUseful();
+  late ExtensionTab _tab = widget.initialTab ?? _remembered() ?? _firstUseful();
+
+  /// 上次选过的页签。存的是名字，读的时候按名字反查，避免枚举顺序变化导致错位。
+  ExtensionTab? _remembered() {
+    final saved = context.read<SettingsStore>().value.lastExtensionTab;
+    if (saved == null || saved.isEmpty) return null;
+    for (final t in ExtensionTab.values) {
+      if (t.name == saved) return t;
+    }
+    return null;
+  }
+
   List<MemoryItem>? _memories;
 
   ExtensionTab _firstUseful() {
@@ -707,7 +718,11 @@ class _ExtensionsQuickSheetState extends State<ExtensionsQuickSheet> {
                         label: Text(counts[tab]! > 0 ? '${labels[tab]!.$2} ${counts[tab]}' : labels[tab]!.$2),
                         selected: _tab == tab,
                         showCheckmark: false,
-                        onSelected: (_) => setState(() => _tab = tab),
+                        onSelected: (_) {
+                          setState(() => _tab = tab);
+                          // 记住这次选择：下次点开还停在这个页签。
+                          store.update((s) => s.copyWith(lastExtensionTab: tab.name));
+                        },
                       ),
                     ),
                 ],
