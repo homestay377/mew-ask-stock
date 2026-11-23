@@ -99,6 +99,22 @@ Map<String, dynamic> deepMerge(Map<String, dynamic> base, Map<String, dynamic> p
   return out;
 }
 
+/// 把毫秒写成看得懂的时长。
+///
+/// 之前界面直接 `(ms / 1000).toStringAsFixed(1)`，于是「481.2s」这种数字到处都是，
+/// 用户得自己在脑子里换算成 8 分钟。统一成 8m1s / 1.5s / 820ms 三档。
+String formatDuration(int ms) {
+  if (ms <= 0) return '';
+  if (ms < 1000) return '${ms}ms';
+  if (ms < 60000) return '${(ms / 1000).toStringAsFixed(1)}s';
+  final totalSec = ms ~/ 1000;
+  final h = totalSec ~/ 3600;
+  final m = (totalSec % 3600) ~/ 60;
+  final sec = totalSec % 60;
+  if (h > 0) return '${h}h${m}m';
+  return '${m}m${sec}s';
+}
+
 String formatTokens(int n) {
   if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(n >= 10000000 ? 0 : 1)}M';
   if (n >= 1000) return '${(n / 1000).toStringAsFixed(n >= 10000 ? 0 : 1)}K';

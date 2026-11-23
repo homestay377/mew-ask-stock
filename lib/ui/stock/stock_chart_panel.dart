@@ -139,8 +139,14 @@ class StockPanelState extends ChangeNotifier {
     final s = v.trim();
     if (s.isEmpty) return;
     if (s == _symbol && name == null) return;
+    final changed = s != _symbol;
     _symbol = s;
-    if (name != null) _name = name;
+    if (name != null && name.trim().isNotEmpty) {
+      _name = name.trim();
+    } else if (changed) {
+      // 换了股票却没带名字：必须清掉，否则会显示上一只的名字，比显示代码更糟。
+      _name = null;
+    }
     notifyListeners();
     unawaited(_persist());
   }
@@ -227,7 +233,8 @@ class _PanelRequest implements StockPanelRequest {
   @override
   Future<bool> show(String code, {String? period}) async {
     stockPanel.ensureExpanded();
-    stockPanel.setSymbol(code);
+    // 名字从本地自选里蹭一个：收起态要显示名称，面板自己不联网。
+    stockPanel.setSymbol(code, name: WatchlistStore.instance.nameOf(code));
     if (period != null && period.isNotEmpty) stockPanel.setPeriod(period);
     return true;
   }
@@ -492,7 +499,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
                 currentCode: widget.state.symbol,
                 onPick: (code, name) {
                   setState(() => _drawerOpen = false);
-                  widget.state.setSymbol(code);
+                  widget.state.setSymbol(code, name: name);
                 },
                 onClose: () => setState(() => _drawerOpen = false),
               ),
@@ -774,7 +781,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
   Future<void> _openSearch() async {
     final hit = await showStockSearch(context, _src.search);
     if (!mounted || hit == null) return;
-    widget.state.setSymbol(hit.fullCode);
+    widget.state.setSymbol(hit.fullCode, name: hit.name);
   }
 
   /// 把当前股票加进自选（默认第一个分组）。
@@ -1022,6 +1029,13 @@ class _CollapsedBar extends StatelessWidget {
   final StockPanelState state;
   final VoidCallback onTap;
 
+  /// 收起态显示的名字：有股票名就用名字，没有才显示代码。
+  static String _displayLabel(StockPanelState state) {
+    final n = state.name?.trim();
+    if (n != null && n.isNotEmpty) return n;
+    return state.symbol.replaceFirst(RegExp(r'^(sh|sz|bj)'), '').toUpperCase();
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -1040,7 +1054,8 @@ class _CollapsedBar extends StatelessWidget {
                 Icon(Icons.candlestick_chart_rounded, size: 18, color: scheme.primary),
                 const SizedBox(width: 8),
                 Text(
-                  state.symbol.replaceFirst(RegExp(r'^(sh|sz|bj)'), '').toUpperCase(),
+                  // 优先显示股票名称；拿不到名字才退回代码。
+                  _displayLabel(state),
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.onSurface),
                 ),
                 const SizedBox(width: 8),

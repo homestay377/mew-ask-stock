@@ -476,7 +476,7 @@ class _SubAgentTrace extends StatelessWidget {
                   if (tokIn > 0)
                     Text(
                       '↑${formatTokens(tokIn)} ↓${formatTokens(tokOut)}'
-                      '${ms > 0 ? ' · ${(ms / 1000).toStringAsFixed(1)}s' : ''}',
+                      '${ms > 0 ? ' · ${formatDuration(ms)}' : ''}',
                       style: style,
                     ),
                 ],
@@ -573,7 +573,14 @@ class _SubAgentTrace extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(short, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(height: 1.3)),
-                Text('${asStr(row['id'])} · ${asStr(row['agent'])}', style: style),
+                Text(
+                  [
+                    asStr(row['id']),
+                    asStr(row['agent']),
+                    if (row['ms'] is num && (row['ms'] as num) > 0) formatDuration((row['ms'] as num).toInt()),
+                  ].join(' · '),
+                  style: style,
+                ),
                 if (deps.isNotEmpty) Text('${t('依赖', 'depends on')}：${deps.join('、')}', style: style),
                 // 实时内容：它在写什么（逐段刷新，最多两行）
                 if (liveText.isNotEmpty)
@@ -779,7 +786,7 @@ class _SubAgentTrace extends StatelessWidget {
     final bits = <String>[
       if (n > 0) '$n ${t('步', 'steps')}',
       if (tok > 0) formatTokens(tok),
-      if (ms > 0) '${(ms / 1000).toStringAsFixed(1)}s',
+      if (ms > 0) formatDuration(ms),
     ];
     return bits.join(' · ');
   }

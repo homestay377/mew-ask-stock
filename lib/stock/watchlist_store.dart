@@ -65,6 +65,18 @@ class WatchlistStore extends ChangeNotifier {
   List<WatchItem> get items => List.unmodifiable(_items);
   bool get loaded => _loaded;
 
+  /// 按代码查名字，查不到返回 null。
+  ///
+  /// 给 K 线面板用：收起态要显示股票名称而不是代码，但面板本身不联网，
+  /// 名字只能从本地自选里拿；拿不到就退回显示代码。
+  String? nameOf(String code) {
+    final c = code.trim();
+    for (final it in _items) {
+      if (it.code == c) return it.name;
+    }
+    return null;
+  }
+
   /// 默认分组，首次使用时创建。
   String get defaultGroupId => _groups.isEmpty ? '' : _groups.first.id;
 

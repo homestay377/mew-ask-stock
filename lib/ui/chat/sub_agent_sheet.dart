@@ -415,14 +415,7 @@ class _TeamSheetState extends State<_TeamSheet> {
     );
   }
 
-  String _duration(int ms) {
-    if (ms >= 60000) {
-      final m = ms ~/ 60000;
-      final s = (ms % 60000) ~/ 1000;
-      return '${m}m${s}s';
-    }
-    return '${(ms / 1000).toStringAsFixed(1)}s';
-  }
+  String _duration(int ms) => formatDuration(ms);
 
   Widget _pill(BuildContext context, String text, Color color) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -514,7 +507,14 @@ class _TeamSheetState extends State<_TeamSheet> {
                 ],
               ),
               const SizedBox(height: 6),
-              Text('${asStr(task['id'])} · ${asStr(task['agent'])}', style: style),
+              Text(
+                [
+                  asStr(task['id']),
+                  asStr(task['agent']),
+                  if (task['ms'] is num && (task['ms'] as num) > 0) formatDuration((task['ms'] as num).toInt()),
+                ].join(' · '),
+                style: style,
+              ),
               if (depList.isNotEmpty) Text('${t('依赖', 'depends on')}：${depList.join('、')}', style: style),
               // 最近一条思考：面板里也能看到它在想什么。
               if (lastThought.isNotEmpty)
@@ -784,7 +784,7 @@ class _TeamSheetState extends State<_TeamSheet> {
               [
                 _statusLabel(asStr(task['status'])),
                 if (stepCount > 0) '$stepCount ${t('步', 'steps')}',
-                if (task['ms'] is num && (task['ms'] as num) > 0) '${((task['ms'] as num) / 1000).toStringAsFixed(1)}s',
+                if (task['ms'] is num && (task['ms'] as num) > 0) formatDuration((task['ms'] as num).toInt()),
               ].join(' · '),
               style: Theme.of(context).textTheme.bodySmall,
             ),
