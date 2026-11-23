@@ -51,11 +51,12 @@ class TeamTask {
       liveOutput = out;
     }
     final steps = snap['steps'];
-    if (steps is List)
+    if (steps is List) {
       liveSteps = [
         for (final e in steps)
           if (e is Map) asMap(e),
       ];
+    }
     final tk = snap['tokens'];
     if (tk is Map) {
       liveIn = tk['in'] is num ? (tk['in'] as num).toInt() : liveIn;
