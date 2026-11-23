@@ -190,3 +190,53 @@ ToolRunContext.onBoardUpdate
 - 追加（`add_team_tasks`）仍发生在 dispatch 返回之后，不与仍在跑的子任务真并行；
 - 单独终止是把该子任务的流式请求中断，模型已经产生的 token 不会回收；
 - token 合计只统计子智能体自己那一轮，不含主控。
+
+## P6：逐段实时输出
+
+状态词能看到"谁在跑"，但看不到"它在写什么"。这一版补上内容层。
+
+### 数据链
+
+```
+SubAgentRunner.onLive（120ms 节流）
+  → TeamTask.applyLive 写入 liveOutput / liveSteps / liveIn / liveOut / liveMs
+  → board.toJson（result 优先，没有就用实时态）
+  → meta.board → 卡片重建
+```
+
+关键点：`toJson` 不再要求任务已经有 `result`。没跑完也有 `output` / `steps` / `tokens` 可画。
+
+### 推送时机
+
+| 时机 | 是否节流 |
+|---|---|
+| 流式收到一段文本 | 120ms 节流 |
+| 每跑完一个工具 | 强制推（`force: true`） |
+| 任务结束 | 强制推 `done` / `failed` |
+
+### 面板合计
+
+```
+本次合计 ↑157.9K ↓537 · 158.4K tokens · 23m10s
+```
+
+扫这段对话里**所有**分派的任务板累加，不是单张板——对应清水的 `subAgentUsageTotals()`。
+还在跑的任务按实时 token 计入，所以数字是「到现在为止」。
+
+### 修掉：满 12 行就冻结
+
+```dart
+// 旧
+if (progress.length >= 12) return;
+// 新
+progress.add(line);
+if (progress.length > 12) progress.removeRange(0, progress.length - 12);
+```
+
+旧写法让长任务在第 12 行之后彻底停止刷新，这是"假界面"的另一半原因。
+
+### 还没做
+
+- 小组消息（`group_post`）与 `request_capability` 的审批记录没有在界面铺开；
+- trace 没写进消息 `metadata`，重启后历史消息看不到过程（清水是 `persisted ?: liveTraces[id]`）；
+- `add_team_tasks` 真并行。
