@@ -458,15 +458,28 @@ class _SubAgentTrace extends StatelessWidget {
     final steps = row['steps'];
     final stepLines = <String>[];
     if (steps is List) {
-      for (final e in steps.reversed) {
-        if (e is! Map) continue;
-        final m = asMap(e);
+      // 协作类（问主控 / 问同伴 / 申请工具）优先露脸：它们说明"它卡在哪、怎么解的"，
+      // 比再列一条 http_request 有用。剩下的位置再补普通步骤。
+      const collab = {'ask_main_agent', 'ask_peer', 'request_capability'};
+      final parsed = <Map<String, dynamic>>[
+        for (final e in steps)
+          if (e is Map) asMap(e),
+      ];
+      for (final m in parsed.reversed) {
         final tool = asStr(m['tool']);
-        if (tool.isEmpty) continue;
-        final ok = m['ok'] == true;
-        final ms = m['ms'] is num ? (m['ms'] as num).toInt() : 0;
-        stepLines.insert(0, '· $tool ${ok ? '✓' : '✗'}${ms > 0 ? ' ${ms}ms' : ''}');
+        if (!collab.contains(tool)) continue;
+        stepLines.insert(0, _collabLine(tool, m));
         if (stepLines.length >= 2) break;
+      }
+      if (stepLines.length < 2) {
+        for (final m in parsed.reversed) {
+          final tool = asStr(m['tool']);
+          if (tool.isEmpty || collab.contains(tool)) continue;
+          final ok = m['ok'] == true;
+          final ms = m['ms'] is num ? (m['ms'] as num).toInt() : 0;
+          stepLines.insert(0, '· $tool ${ok ? '✓' : '✗'}${ms > 0 ? ' ${ms}ms' : ''}');
+          if (stepLines.length >= 2) break;
+        }
       }
     }
     final color = switch (status) {
@@ -552,6 +565,34 @@ class _SubAgentTrace extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// 协作类步骤显示成一句人话。
+  String _collabLine(String tool, Map<String, dynamic> m) {
+    final raw = asStr(m['output']);
+    final ok = m['ok'] == true;
+    final j = tryJsonDecode(raw);
+    String detail = '';
+    if (j is Map) {
+      final mm = asMap(j);
+      for (final k in const ['answer', 'output', 'note', 'error']) {
+        final v = asStr(mm[k]).replaceAll('\s+', ' ').trim();
+        if (v.isNotEmpty) {
+          detail = v.length <= 40 ? v : '${v.substring(0, 40)}…';
+          break;
+        }
+      }
+    }
+    if (detail.isEmpty) {
+      detail = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+    }
+    final label = switch (tool) {
+      'ask_main_agent' => t('问主控', 'asked lead'),
+      'ask_peer' => t('问同伴', 'asked peer'),
+      'request_capability' => t('申请工具', 'requested tool'),
+      _ => tool,
+    };
+    return '· $label ${ok ? '✓' : '✗'}${detail.isEmpty ? '' : ' $detail'}';
   }
 
   String _statusWord(String s) => switch (s) {

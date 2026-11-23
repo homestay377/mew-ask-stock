@@ -48,14 +48,14 @@ class TeamTask {
     }
     final out = asStr(snap['output']);
     if (out.isNotEmpty) {
-      liveOutput = out;
+      liveOutput = _clipText(out, boardLiveOutputLimit);
     }
     final steps = snap['steps'];
     if (steps is List) {
-      liveSteps = [
+      liveSteps = _tailSteps([
         for (final e in steps)
           if (e is Map) asMap(e),
-      ];
+      ]);
     }
     final tk = snap['tokens'];
     if (tk is Map) {
@@ -82,15 +82,25 @@ class TeamTask {
     // 任务原文要带上：界面在任务还没产出时要靠它显示「这条在干什么」。
     'task': task,
     if (result != null) 'ok': result!.ok,
-    'output': result?.output ?? liveOutput,
+    'output': _clipText(result?.output ?? liveOutput, boardResultOutputLimit),
     if (error != null) 'error': error,
     'ms': result != null ? elapsedMs : liveMs,
-    'steps': result != null ? [for (final s in result!.steps) s.toJson()] : liveSteps,
+    // 只留最近几步、每步输出截断：快照给界面用，不当归档原文。
+    'steps': _tailSteps(result != null ? [for (final s in result!.steps) s.toJson()] : liveSteps),
     'tokens': {'input': result?.usage.input ?? liveIn, 'output': result?.usage.output ?? liveOut},
     'step_count': result != null ? result!.steps.length : liveSteps.length,
     if (liveStatus.isNotEmpty) 'live_status': liveStatus,
   };
 }
+
+/// 任务板快照的体积上限。
+///
+/// 为什么需要：[board] 会随 ToolPart.meta 每 120ms 更新一次，而会话每 3 秒整份
+/// JSON 落一次库。不裁剪的话，一次长任务就能把库撑到几 MB，读写都会拖慢。
+const boardStepKeep = 8;
+const boardStepOutputLimit = 400;
+const boardLiveOutputLimit = 2000;
+const boardResultOutputLimit = 2000;
 
 /// 依赖产出注入下游任务时的预算（对齐清水 1.4.2 的数字）。
 const dependencyResultPerTaskLimit = 2500;
@@ -319,6 +329,17 @@ Future<void> _runOne(
   }
   onBoard?.call();
   onProgress?.call('${t.id} · ${t.agentName} ${t.status.name}');
+}
+
+String _clipText(String s, int max) => s.length <= max ? s : '${s.substring(0, max)}…';
+
+/// 只保留最近 [boardStepKeep] 步，且每步输出截断到 [boardStepOutputLimit]。
+List<Map<String, dynamic>> _tailSteps(List<Map<String, dynamic>> steps) {
+  final tail = steps.length <= boardStepKeep ? steps : steps.sublist(steps.length - boardStepKeep);
+  return [
+    for (final s in tail)
+      {...s, if (s['output'] is String) 'output': _clipText(s['output'] as String, boardStepOutputLimit)},
+  ];
 }
 
 /// 正在执行的子任务：`run_id/task_id` → 该任务自己的取消令牌。

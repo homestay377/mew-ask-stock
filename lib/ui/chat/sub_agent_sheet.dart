@@ -20,19 +20,23 @@ Future<void> showSubAgentTeamSheet(
   BuildContext context, {
   required List<Part> Function() liveParts,
   Future<void> Function(String text)? onSubmit,
+  Future<String> Function(String text)? onAskTeam,
 }) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (_) => _TeamSheet(liveParts: liveParts, onSubmit: onSubmit),
+    builder: (_) => _TeamSheet(liveParts: liveParts, onSubmit: onSubmit, onAskTeam: onAskTeam),
   );
 }
 
 class _TeamSheet extends StatefulWidget {
-  const _TeamSheet({required this.liveParts, this.onSubmit});
+  const _TeamSheet({required this.liveParts, this.onSubmit, this.onAskTeam});
   final List<Part> Function() liveParts;
   final Future<void> Function(String text)? onSubmit;
+
+  /// 团队运行中向 lead 追问（独立通道，不排队等主生成循环）。
+  final Future<String> Function(String text)? onAskTeam;
 
   @override
   State<_TeamSheet> createState() => _TeamSheetState();
@@ -43,6 +47,10 @@ class _TeamSheetState extends State<_TeamSheet> {
   Timer? _tick;
   final _input = TextEditingController();
   final _focus = FocusNode();
+
+  /// 面板内的追问记录（问题 + lead 回答）。
+  final _asked = <({String question, String? answer})>[];
+  bool _asking = false;
 
   @override
   void initState() {
@@ -332,6 +340,8 @@ class _TeamSheetState extends State<_TeamSheet> {
                       ),
                     ),
                   ),
+                  // 追问记录：团队还在跑时，用户问的话和 lead 的回答都留在这里。
+                  for (final item in _asked) _askedCard(context, item, style),
                 ],
                 const SizedBox(height: 10),
                 Text(
@@ -544,6 +554,43 @@ class _TeamSheetState extends State<_TeamSheet> {
     );
   }
 
+  Widget _askedCard(BuildContext context, ({String question, String? answer}) item, TextStyle? style) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(t('你', 'you'), style: style),
+              const SizedBox(height: 4),
+              Text(item.question, style: const TextStyle(height: 1.35)),
+              const SizedBox(height: 10),
+              Text(t('lead', 'lead'), style: style),
+              const SizedBox(height: 4),
+              if (item.answer == null)
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(strokeWidth: 1.8, color: scheme.primary),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(t('正在回答…', 'answering…'), style: style),
+                  ],
+                )
+              else
+                Text(item.answer!, style: const TextStyle(height: 1.35)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _memberCard(
     BuildContext context, {
     required String name,
@@ -656,9 +703,30 @@ class _TeamSheetState extends State<_TeamSheet> {
   }
 
   Future<void> _send() async {
-    final submit = widget.onSubmit;
     final text = _input.text.trim();
-    if (submit == null || text.isEmpty) return;
+    if (text.isEmpty) return;
+    final ask = widget.onAskTeam;
+    final submit = widget.onSubmit;
+
+    // 团队还在跑：走追问通道，把回答留在面板里，不要把用户踢出界面。
+    if (_busy && ask != null) {
+      _input.clear();
+      setState(() {
+        _asking = true;
+        _asked.add((question: text, answer: null));
+      });
+      final reply = await ask(text);
+      if (!mounted) return;
+      setState(() {
+        _asking = false;
+        if (_asked.isNotEmpty) {
+          _asked[_asked.length - 1] = (question: text, answer: reply);
+        }
+      });
+      return;
+    }
+
+    if (submit == null) return;
     _input.clear();
     Navigator.of(context).pop();
     await submit(text);

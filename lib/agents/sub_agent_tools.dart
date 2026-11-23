@@ -24,6 +24,12 @@ String _keyOf(ToolRunContext ctx) => ctx.sessionKey ?? '__default__';
 
 TeamBoard? currentBoard(ToolRunContext ctx) => _boards[_keyOf(ctx)];
 
+/// 按会话 key 取任务板。给「团队追问」用：ChatController 只拿得到会话 id。
+TeamBoard? boardForSession(String? sessionKey) => _boards[sessionKey ?? '__default__'];
+
+/// 会话里是否真的有一张任务板。
+bool hasBoardForSession(String? sessionKey) => boardForSession(sessionKey) != null;
+
 AppTool _dispatchTool(List<SubAgent> agents) {
   final names = [for (final a in agents) a.name];
   return AppTool(

@@ -89,7 +89,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   void _onDockHeight(double height) {
-    if ((height - _dock.value).abs() > 0.5) _dock.value = height;
+    if ((height - _dock.value).abs() > 0.5) {
+      _dock.value = height;
+    }
   }
 
   @override
@@ -134,7 +136,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     // 1.5 s expiry on stop, and only reveal while the list is stationary.
     // A stream update or viewport resize must never re-arm the controls.
     _navigationTimer?.cancel();
-    if (started) _recentScroll = true;
+    if (started) {
+      _recentScroll = true;
+    }
     _navigationTimer = Timer(chatNavigationVisibleDuration, () {
       if (!mounted) return;
       _recentScroll = false;
@@ -258,7 +262,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     if (_seekIndex == null && visible != null) {
       final readingLine = _scroll.offset + 2;
       for (var i = visible.$1; i <= visible.$2 && i < nodes.length; i++) {
-        if (_messageOffset(i) <= readingLine) current = i;
+        if (_messageOffset(i) <= readingLine) {
+          current = i;
+        }
       }
     }
     for (var i = current + (next ? 1 : -1); i >= 0 && i < nodes.length; i += next ? 1 : -1) {
@@ -585,6 +591,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                           context,
                           liveParts: () => [for (final n in c.conversation.nodes) ...n.current.parts],
                           onSubmit: (text) => c.send([TextPart(text)]),
+                          onAskTeam: (text) => c.askTeam(question: text),
                         ),
                       ),
                     Composer(
@@ -717,6 +724,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             context,
             liveParts: () => [for (final n in c.conversation.nodes) ...n.current.parts],
             onSubmit: (text) => c.send([TextPart(text)]),
+            onAskTeam: (text) => c.askTeam(question: text),
           ),
         ),
         IconButton(

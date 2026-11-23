@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../agents/sub_agent_store.dart';
 import '../agents/sub_agent_tools.dart';
+import '../agents/team_lead.dart';
 import '../agents/tool_run_context.dart';
 import '../ai/factory.dart';
 import '../ai/message.dart';
@@ -249,6 +250,39 @@ class ChatController extends ChangeNotifier {
 
   // ---------------------------------------------------------------- internal
 
+  /// 团队运行期间的追问通道。
+  ///
+  /// 主对话正在被 `dispatch_subagents` 占住时，用户发的话排不进生成循环；
+  /// 这里用同一模型做一次独立生成，拿任务板快照回答，并允许追加任务。
+  Future<String> askTeam({required String question}) async {
+    final q = question.trim();
+    if (q.isEmpty) return '';
+    final board = boardForSession(_conv.id);
+    if (board == null) {
+      return t('现在没有正在运行的团队任务。', 'No team task is running right now.');
+    }
+    final resolved = resolvedModel;
+    if (resolved == null) {
+      return t('请先选择模型。', 'Pick a model first.');
+    }
+    final agents = await SubAgentStore.load();
+    final tools = buildSubAgentTools(agents: agents).where((x) => x.name == 'add_team_tasks').toList();
+    final ctx = ToolRunContext(
+      settings: settings,
+      provider: resolved.provider,
+      model: resolved.model,
+      tools: tools,
+      cancel: _cancel ?? CancelToken(),
+      sessionKey: _conv.id,
+    );
+    try {
+      final out = await askTeamLead(ctx: ctx, board: board, question: q, extraTools: tools);
+      return out.isEmpty ? t('lead 没有给出回答。', 'The lead returned nothing.') : out;
+    } catch (e) {
+      return t('追问失败：$e', 'Ask failed: $e');
+    }
+  }
+
   Future<List<AppTool>> _collectTools(ModelConfig model) async {
     final a = assistant;
     final s = settings;
@@ -347,7 +381,9 @@ class ChatController extends ChangeNotifier {
       }
       if (!cancel.isCancelled && !_disposed) await _generateResponse(targetNodeId: targetNodeId, epoch: epoch);
     } catch (e) {
-      if (!cancel.isCancelled) lastError = '$e';
+      if (!cancel.isCancelled) {
+        lastError = '$e';
+      }
     } finally {
       await _persist(force: true);
       _generating = false;
@@ -478,7 +514,9 @@ class ChatController extends ChangeNotifier {
     } on http.RequestAbortedException {
       // stopped by user
     } catch (e) {
-      if (!cancel.isCancelled) lastError = e is ApiException ? e.toString() : '$e';
+      if (!cancel.isCancelled) {
+        lastError = e is ApiException ? e.toString() : '$e';
+      }
     } finally {
       acc.closeAll();
       // A superseded stream (edit, regenerate, new turn) must not write back:
