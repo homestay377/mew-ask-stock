@@ -499,6 +499,8 @@ class _SubAgentTrace extends StatelessWidget {
     final running = status == 'running';
     final rawOutput = asStr(row['output']).trim();
     final liveText = running ? rawOutput.replaceAll(RegExp(r'\s+'), ' ') : '';
+    // 已完成的产出也直接铺在卡片上（最多三行）：不想为了看结论再点开面板。
+    final doneText = !running ? rawOutput.replaceAll(RegExp(r'\s+'), ' ') : '';
     final steps = row['steps'];
     final stepLines = <String>[];
     if (steps is List) {
@@ -589,6 +591,17 @@ class _SubAgentTrace extends StatelessWidget {
                     child: Text(
                       liveText,
                       maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: style?.copyWith(color: scheme.onSurface, height: 1.35),
+                    ),
+                  ),
+                // 已完成：结论摘要
+                if (doneText.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      doneText,
+                      maxLines: 3,
                       overflow: TextOverflow.ellipsis,
                       style: style?.copyWith(color: scheme.onSurface, height: 1.35),
                     ),

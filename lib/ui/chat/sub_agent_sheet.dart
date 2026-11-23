@@ -532,6 +532,16 @@ class _TeamSheetState extends State<_TeamSheet> {
                     style: style?.copyWith(fontStyle: FontStyle.italic, height: 1.35),
                   ),
                 ),
+              if (!running && output.trim().isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    output.replaceAll(RegExp(r'\s+'), ' '),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: style?.copyWith(color: scheme.onSurface, height: 1.35),
+                  ),
+                ),
               if (running && output.trim().isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),

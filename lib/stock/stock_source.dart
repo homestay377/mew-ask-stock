@@ -364,7 +364,7 @@ class StockSource {
       () => _klineEastmoney(code, p, count),
     ]) {
       try {
-        final s = await fetcher();
+        final s = await _retryOnce(fetcher);
         // 降级成功也要留痕：主源挂了这件事必须传到分析层，
         // 不然模型会把「新浪不复权数据」当成腾讯的连续序列来解读。
         return errors.isEmpty ? s : s.withFallback(errors.join('；'));
@@ -374,6 +374,31 @@ class StockSource {
     }
     throw StockDataError('行情源都失败了：${errors.join('；')}');
   }
+
+  /// 同一个源内先重试一次再降级。
+  ///
+  /// 原来一次失败就直接跳到下一个源：网络抖一下，腾讯（前复权）就掉到
+  /// 新浪（不复权），整个分析口径跟着变。多等 250ms 往往就回来了。
+  Future<KlineSeries> _retryOnce(Future<KlineSeries> Function() fetcher) async {
+    Object? last;
+    for (var i = 0; i <= sourceRetries; i++) {
+      try {
+        return await fetcher();
+      } catch (e) {
+        last = e;
+        final msg = '$e';
+        // 确定性错误（周期不支持、代码非法）重试没意义
+        if (msg.contains('不支持') || msg.contains('非法') || msg.contains('无法识别')) break;
+        if (i < sourceRetries) {
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+        }
+      }
+    }
+    throw last ?? StockDataError('未知错误');
+  }
+
+  /// 每个源额外重试的次数。
+  static const sourceRetries = 1;
 
   // ------------------------------------------------------------ 东财（第三源）
 
