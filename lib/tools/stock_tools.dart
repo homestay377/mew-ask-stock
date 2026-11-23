@@ -82,7 +82,7 @@ List<AppTool> buildStockTools({bool enabled = true}) {
       displayName: '大盘与市场',
       description: '''看今天的市场全貌。可选模块（默认全开）：
 - indices：上证/深成/创业板/科创50（数据走腾讯，不封 IP）
-- sectors：板块涨幅榜或跌幅榜，带主力净流入（东财）
+- sectors：板块涨幅榜或跌幅榜（**按涨跌幅 change_pct 排序**），附带主力净流入 net_inflow_yi（东财）
 - limit_up：涨停家数与涨停股列表，含连板数（东财）
 - margin：最近几日两市融资融券余额（东财）
 - billboard：最近一个交易日龙虎榜（东财）
@@ -100,6 +100,9 @@ List<AppTool> buildStockTools({bool enabled = true}) {
         'limit': intProp('每类返回条数，默认 8，上限 20'),
       }),
       promptHint:
+          '「今天涨得最好的板块」= 按 change_pct 从高到低，取 sectors 数组前几条；'
+          '**不要按 net_inflow_yi（主力净流入）排序**，那会给出完全不同的名单。'
+          '回答里引用板块时写清涨跌幅数字与该板块的领涨股，不要只写板块名。'
           '市场问题里的指数、板块、涨停数、两融、龙虎榜、热榜数字必须来自这个工具，不要凭印象说「今天普涨」。'
           '每个数字都要注明时间（as_of / date）与来源模块名。'
           'errors 里出现的模块就是取不到，如实说明，不要用板块涨幅去反推涨停家数这类指标。'
@@ -128,6 +131,11 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           payload['sectors_title'] = dir ? '涨幅榜' : '跌幅榜';
           payload['sectors'] = r.items;
           payload['sector_total'] = r.total;
+          // 排序语义必须显式给出：涨跌幅才是「涨得最好」的依据，
+          // net_inflow_yi（主力净流入）只是附带字段，不是排序字段。
+          payload['sectors_sorted_by'] = r.sortedBy;
+          payload['sectors_order'] = r.order;
+          if (!r.monotonic) payload['sectors_note'] = '接口返回顺序不单调，已在本地按涨跌幅重排';
           if (r.error != null) errors['sectors'] = r.error!;
         }
         if (on('limit_up')) {

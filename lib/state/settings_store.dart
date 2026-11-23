@@ -88,7 +88,7 @@ class SettingsStore extends ChangeNotifier {
     // 顺带补上股票分析快捷短语（同一标记控制，只装一次）。
     final existingQuick = {for (final q in s.quickMessages) q.id};
     final newQuick = [
-      for (final q in defaultStockQuickMessages())
+      for (final q in [...defaultStockQuickMessages(), ...defaultStockAnalysisQuickMessages()])
         if (!existingQuick.contains(q.id)) q,
     ];
 

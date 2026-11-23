@@ -93,42 +93,69 @@ class MarketSource {
   // ---------------------------------------------------------------- 板块（东财）
 
   /// 板块涨幅榜 / 跌幅榜。东财有风控，走 [_Em.limit]。
-  Future<({List<Map<String, dynamic>> items, int total, String? error})> sectors({
-    bool descending = true,
-    int limit = 8,
-  }) async {
+  Future<({List<Map<String, dynamic>> items, int total, String sortedBy, String order, bool monotonic, String? error})>
+  sectors({bool descending = true, int limit = 8}) async {
     final po = descending ? 1 : 0;
     final url = Uri.parse(
       'https://push2.eastmoney.com/api/qt/clist/get'
       '?pn=1&pz=$limit&po=$po&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2'
       '&fields=f12,f14,f3,f62,f128,f136',
     );
-    return _Em.guard(() async {
+    return _Em.serial(() async {
       final j = tryJsonDecode(await _get(url, headers: _Em.referer('https://quote.eastmoney.com/')));
       final data = (j is Map) ? asMapOrNull(asMap(j)['data']) : null;
       final diff = data?['diff'];
       if (diff is! List || diff.isEmpty) {
-        return (items: const <Map<String, dynamic>>[], total: 0, error: '返回为空（东财限流）');
+        return (
+          items: const <Map<String, dynamic>>[],
+          total: 0,
+          sortedBy: 'change_pct',
+          order: descending ? 'desc' : 'asc',
+          monotonic: true,
+          error: '返回为空（东财限流）',
+        );
       }
       final now = _stamp();
+      final items = [
+        for (final e in diff)
+          if (e is Map)
+            {
+              'code': asStr(asMap(e)['f12']),
+              'name': asStr(asMap(e)['f14']),
+              // 排序依据：涨跌幅。net_inflow 只是附带字段，不参与排序。
+              'change_pct': _d(asMap(e)['f3']),
+              'net_inflow_yi': _yi(asMap(e)['f62']),
+              if (asStr(asMap(e)['f128']).isNotEmpty) 'leader': asStr(asMap(e)['f128']),
+              if (_d(asMap(e)['f136']) != null) 'leader_pct': _d(asMap(e)['f136']),
+              'as_of': now,
+            },
+      ];
+      // 自检：sorted_by=change_pct 却出现不单调，说明接口排序参数变了，
+      // 与其静默返回错序，不如在本地按涨跌幅重排一次。
+      final pcts = [for (final e in items) e['change_pct'] as double?];
+      var monotonic = true;
+      for (var i = 0; i + 1 < pcts.length; i++) {
+        final a = pcts[i];
+        final b = pcts[i + 1];
+        if (a == null || b == null) continue;
+        if (descending ? a < b : a > b) monotonic = false;
+      }
+      if (!monotonic) {
+        items.sort((x, y) {
+          final a = (x['change_pct'] as double?) ?? 0;
+          final b = (y['change_pct'] as double?) ?? 0;
+          return descending ? b.compareTo(a) : a.compareTo(b);
+        });
+      }
       return (
-        items: [
-          for (final e in diff)
-            if (e is Map)
-              {
-                'code': asStr(asMap(e)['f12']),
-                'name': asStr(asMap(e)['f14']),
-                'change_pct': _d(asMap(e)['f3']),
-                'net_inflow_yi': _yi(asMap(e)['f62']),
-                if (asStr(asMap(e)['f128']).isNotEmpty) 'leader': asStr(asMap(e)['f128']),
-                if (_d(asMap(e)['f136']) != null) 'leader_pct': _d(asMap(e)['f136']),
-                'as_of': now,
-              },
-        ],
+        items: items,
+        sortedBy: 'change_pct',
+        order: descending ? 'desc' : 'asc',
+        monotonic: monotonic,
         total: data?['total'] is num ? (data!['total'] as num).toInt() : diff.length,
         error: null,
       );
-    }, fallback: (items: const <Map<String, dynamic>>[], total: 0));
+    });
   }
 
   // ---------------------------------------------------------------- 涨停池（东财）
@@ -344,7 +371,7 @@ class MarketSource {
   }
 }
 
-/// 东财请求的限流器。
+/// 东财请求的限流器与串行器。
 ///
 /// 东财有风控：我实测连续 4-5 个请求之后开始返回空。所有 `push2` /
 /// `datacenter-web` 请求都串行 + 至少 [minGapMs] 间隔，宁可慢一点。
@@ -354,11 +381,8 @@ class _Em {
 
   static Map<String, String> referer(String r) => {'Referer': r, 'User-Agent': MarketSource._ua};
 
-  /// 串行执行并限速；出错时返回 [fallback] 并带上 error。
-  static Future<({List<Map<String, dynamic>> items, int total, String? error})> guard(
-    Future<({List<Map<String, dynamic>> items, int total, String? error})> Function() body, {
-    required ({List<Map<String, dynamic>> items, int total}) fallback,
-  }) async {
+  /// 串行并限速后执行 [body]；[body] 自己负责把异常转成 error 字段。
+  static Future<T> serial<T>(Future<T> Function() body) async {
     final now = DateTime.now();
     final last = _last;
     if (last != null) {
@@ -368,10 +392,6 @@ class _Em {
       }
     }
     _last = DateTime.now();
-    try {
-      return await body();
-    } catch (e) {
-      return (items: fallback.items, total: fallback.total, error: '$e');
-    }
+    return body();
   }
 }
