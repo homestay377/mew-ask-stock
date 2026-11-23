@@ -30,6 +30,17 @@ TeamBoard? boardForSession(String? sessionKey) => _boards[sessionKey ?? '__defau
 /// 会话里是否真的有一张任务板。
 bool hasBoardForSession(String? sessionKey) => boardForSession(sessionKey) != null;
 
+/// 当前内存里最新的那张任务板（活的，不是序列化快照）。
+///
+/// 界面优先读这个：绕开 `meta.board` 的 JSON 序列化，任务板一改就能看见。
+TeamBoard? get activeTeamBoard {
+  TeamBoard? last;
+  for (final b in _boards.values) {
+    last = b;
+  }
+  return last;
+}
+
 AppTool _dispatchTool(List<SubAgent> agents) {
   final names = [for (final a in agents) a.name];
   return AppTool(

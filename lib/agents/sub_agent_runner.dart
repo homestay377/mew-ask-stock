@@ -24,15 +24,34 @@ const requestCapabilityToolName = 'request_capability';
 
 /// 子智能体在某一轮里调用某个工具的记录。
 class SubAgentStep {
-  const SubAgentStep({required this.tool, required this.output, this.isError = false, this.ms = 0});
+  const SubAgentStep({
+    required this.tool,
+    required this.output,
+    this.isError = false,
+    this.ms = 0,
+    this.type = SubAgentStepType.tool,
+  });
 
   final String tool;
   final String output;
   final bool isError;
   final int ms;
 
-  Map<String, dynamic> toJson() => {'tool': tool, 'ok': !isError, 'ms': ms, 'chars': output.length};
+  /// 这一步是工具调用、推理片段，还是正文片段。
+  final SubAgentStepType type;
+
+  Map<String, dynamic> toJson() => {
+    'tool': tool,
+    'type': type.name,
+    'ok': !isError,
+    'ms': ms,
+    'chars': output.length,
+    'output': output,
+  };
 }
+
+/// 对齐清水 1.4.2 的 `SubAgentStepType`：推理 / 正文 / 工具三分。
+enum SubAgentStepType { reasoning, text, tool }
 
 /// 一个子智能体跑完一个任务的结果。
 class SubAgentResult {
@@ -163,6 +182,9 @@ class SubAgentRunner {
   static const _toolTimeout = Duration(minutes: 3);
   static const _stepOutputLimit = 4000;
 
+  /// 推理片段与正文片段各自保留多少字进步骤列表。
+  static const _thoughtLimit = 1200;
+
   Future<SubAgentResult> run(SubAgent agent, String task, {String extraContext = ''}) async {
     final started = DateTime.now();
     int elapsed() => DateTime.now().difference(started).inMilliseconds;
@@ -285,6 +307,21 @@ class SubAgentRunner {
         break;
       }
       usage = usage + round.usage;
+      // 这一轮的推理与正文也记成步骤：界面要能看到"它在想什么"，
+      // 而不只是"它调了哪个工具"。对齐清水的 REASONING / TEXT / TOOL 三分。
+      for (final p in round.parts) {
+        if (p is ReasoningPart) {
+          final t = p.text.trim();
+          if (t.isNotEmpty) {
+            steps.add(SubAgentStep(tool: '思考', output: _clip(t, _thoughtLimit), type: SubAgentStepType.reasoning));
+          }
+        } else if (p is TextPart) {
+          final t = p.text.trim();
+          if (t.isNotEmpty) {
+            steps.add(SubAgentStep(tool: '正文', output: _clip(t, _thoughtLimit), type: SubAgentStepType.text));
+          }
+        }
+      }
       // 工具轮通常没有正文；别让空字符串把流式期间已经显示的文本清掉。
       final roundText = _textOf(round.parts);
       if (roundText.trim().isNotEmpty) {

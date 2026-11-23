@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../agents/sub_agent_tools.dart';
 import '../../agents/team_board.dart';
 import '../../ai/message.dart';
 import '../../core/i18n.dart';
@@ -81,6 +83,42 @@ class _ToolCardState extends State<ToolCard> {
   bool _open = false;
   (String, String, bool)? _plotKey;
   _PlotResult _cachedPlot = _noPlot;
+
+  // 子智能体分派在跑的时候，卡片自己按 400ms 刷新。
+  // 只靠父级 rebuild 不够：聊天页在某些状态下不会频繁重建，卡片就"一点反应都没有"。
+  Timer? _tick;
+
+  bool get _liveTeam =>
+      widget.part.output == null && (widget.part.name == 'dispatch_subagents' || widget.part.name == 'add_team_tasks');
+
+  @override
+  void initState() {
+    super.initState();
+    _syncTick();
+  }
+
+  @override
+  void didUpdateWidget(covariant ToolCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncTick();
+  }
+
+  void _syncTick() {
+    if (_liveTeam) {
+      _tick ??= Timer.periodic(const Duration(milliseconds: 400), (_) {
+        if (mounted) setState(() {});
+      });
+    } else {
+      _tick?.cancel();
+      _tick = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
 
   _PlotResult _plotResult(ToolPart part) {
     final source = part.output;
@@ -368,6 +406,12 @@ class _SubAgentTrace extends StatelessWidget {
 
   /// 实时任务板：优先 meta.board，退回已完成 output 里的 board。
   Map<String, dynamic>? get _board {
+    // 还没返回的分派：直接读内存里那张活的任务板。
+    // meta.board 是序列化快照，万一那步没写进去，界面就永远空白——这里兜住。
+    if (part.output == null) {
+      final live = activeTeamBoard;
+      if (live != null && live.tasks.isNotEmpty) return live.toJson();
+    }
     final meta = part.meta?['board'];
     if (meta is Map) {
       final m = asMap(meta);
@@ -465,16 +509,26 @@ class _SubAgentTrace extends StatelessWidget {
         for (final e in steps)
           if (e is Map) asMap(e),
       ];
+      // 优先级：推理（最能说明它在想什么）> 协作调用 > 普通工具。
       for (final m in parsed.reversed) {
-        final tool = asStr(m['tool']);
-        if (!collab.contains(tool)) continue;
-        stepLines.insert(0, _collabLine(tool, m));
+        if (asStr(m['type']) != 'reasoning') continue;
+        final text = asStr(m['output']).replaceAll(RegExp(r'\s+'), ' ').trim();
+        if (text.isEmpty) continue;
+        stepLines.insert(0, '· ${t('思考', 'thinking')} ${text.length <= 40 ? text : '${text.substring(0, 40)}…'}');
         if (stepLines.length >= 2) break;
       }
       if (stepLines.length < 2) {
         for (final m in parsed.reversed) {
           final tool = asStr(m['tool']);
-          if (tool.isEmpty || collab.contains(tool)) continue;
+          if (!collab.contains(tool)) continue;
+          stepLines.insert(0, _collabLine(tool, m));
+          if (stepLines.length >= 2) break;
+        }
+      }
+      if (stepLines.length < 2) {
+        for (final m in parsed.reversed) {
+          final tool = asStr(m['tool']);
+          if (tool.isEmpty || collab.contains(tool) || asStr(m['type']) != 'tool') continue;
           final ok = m['ok'] == true;
           final ms = m['ms'] is num ? (m['ms'] as num).toInt() : 0;
           stepLines.insert(0, '· $tool ${ok ? '✓' : '✗'}${ms > 0 ? ' ${ms}ms' : ''}');

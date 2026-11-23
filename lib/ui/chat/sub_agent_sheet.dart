@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../agents/sub_agent.dart';
 import '../../agents/sub_agent_store.dart';
+import '../../agents/sub_agent_tools.dart';
 import '../../ai/message.dart';
 import '../../core/i18n.dart';
 import '../../core/util.dart';
@@ -86,6 +87,12 @@ class _TeamSheetState extends State<_TeamSheet> {
 
   /// 最新一张任务板。优先用运行期 `meta.board`（实时），退回已完成的 output。
   Map<String, dynamic>? get _board {
+    // 第一优先：内存里那张活的任务板。
+    //
+    // 之前只读 meta.board（序列化过的 JSON 快照），一旦这步没写进去或写失败，
+    // 面板就永远是空的。活的 TeamBoard 不依赖序列化，任务板一改这里就能看见。
+    final live = activeTeamBoard;
+    if (live != null && live.tasks.isNotEmpty) return live.toJson();
     for (final p in _toolParts.reversed) {
       final meta = p.meta?['board'];
       if (meta is Map) {
@@ -452,6 +459,16 @@ class _TeamSheetState extends State<_TeamSheet> {
     final error = asStr(task['error']);
     final stepsRaw = task['steps'];
     final stepCount = stepsRaw is List ? stepsRaw.length : 0;
+    var lastThought = '';
+    if (stepsRaw is List) {
+      for (final e in stepsRaw.reversed) {
+        if (e is! Map) continue;
+        if (asStr(e['type']) != 'reasoning') continue;
+        lastThought = asStr(e['output']).replaceAll(RegExp(r'\s+'), ' ').trim();
+        if (lastThought.length > 80) lastThought = '${lastThought.substring(0, 80)}…';
+        break;
+      }
+    }
     final running = status == 'running';
     final color = _statusColor(status, scheme);
     final head = asStr(task['task']).replaceAll('\n', ' ').trim();
@@ -499,6 +516,17 @@ class _TeamSheetState extends State<_TeamSheet> {
               const SizedBox(height: 6),
               Text('${asStr(task['id'])} · ${asStr(task['agent'])}', style: style),
               if (depList.isNotEmpty) Text('${t('依赖', 'depends on')}：${depList.join('、')}', style: style),
+              // 最近一条思考：面板里也能看到它在想什么。
+              if (lastThought.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    '${t('思考', 'thinking')}：$lastThought',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: style?.copyWith(fontStyle: FontStyle.italic, height: 1.35),
+                  ),
+                ),
               if (running && output.trim().isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
