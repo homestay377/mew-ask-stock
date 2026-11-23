@@ -657,7 +657,15 @@ class ChatController extends ChangeNotifier {
         sessionKey: runCtx.sessionKey,
       );
       try {
-        final out = await runWithToolContext(callCtx, () => tool.execute(current.inputJson)).timeout(limit);
+        // 超时必须真的把任务停掉：`Future.timeout` 只是让 await 提前返回，
+        // 底层团队照跑、token 照烧，用户看到「失败」但账单还在涨。
+        final out = await runWithToolContext(callCtx, () => tool.execute(current.inputJson)).timeout(
+          limit,
+          onTimeout: () {
+            callCtx.cancel.cancel();
+            throw TimeoutException('工具执行超时（${limit.inMinutes} 分钟），已取消', limit);
+          },
+        );
         final decoded = call.name == 'plot_cartesian' || call.name == 'plot_spatial' ? tryJsonDecode(out) : null;
         // 执行途中 pushProgress 改过这个 part，重新取一次，别把 meta 覆盖掉。
         acc.parts[idx] = (acc.parts[idx] as ToolPart).copyWith(

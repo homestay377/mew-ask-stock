@@ -224,7 +224,21 @@ Future<void> runTeamBoard(
   push();
   var guard = 0;
   while (true) {
-    if (isCancelled()) break;
+    if (isCancelled()) {
+      // 取消也要把状态机收尾：否则 running / pending 原地留着，板永远收不了尾。
+      for (final t in board.tasks) {
+        if (t.status == TeamTaskStatus.running) {
+          t.status = TeamTaskStatus.failed;
+          t.error = t.error ?? '已取消';
+        } else if (t.status == TeamTaskStatus.pending) {
+          t.status = TeamTaskStatus.skipped;
+          t.error = '已取消';
+        }
+      }
+      board.closed = true;
+      push();
+      break;
+    }
     if (++guard > 64) break;
 
     // 1) 先把「前置已经废了」的任务判死，避免它们一直挂着。
@@ -285,6 +299,7 @@ Future<void> runTeamBoard(
           t.error = '依赖无法满足（可能有环）';
         }
       }
+      board.closed = true;
       push();
       break;
     }

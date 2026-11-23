@@ -108,17 +108,28 @@ String _clip(String s, int max) => s.length <= max ? s : '${s.substring(0, max)}
 /// 而是按交付格式声明「取了什么、有几条失败、但没形成结论」。
 String _fallbackDigest(List<SubAgentStep> steps) {
   if (steps.isEmpty) return '';
-  final okCount = steps.where((s) => !s.isError).length;
+  // 只统计真正的工具调用：reasoning / text 步骤混进来会把「5 次工具调用」
+  // 写成「思考、正文、stock_quote」这种鬼话。
+  final toolSteps = [
+    for (final s in steps)
+      if (s.type == SubAgentStepType.tool) s,
+  ];
+  if (toolSteps.isEmpty) {
+    return '【结论】未能形成判断：本次没有产生任何工具调用，也没有结论。\n'
+        '【证据】无。\n'
+        '【未完成】模型没有调用工具，建议检查该子智能体的白名单或任务描述是否过窄。';
+  }
+  final okCount = toolSteps.where((s) => !s.isError).length;
   final failed = <String>{};
   final tools = <String>[];
-  for (final s in steps) {
+  for (final s in toolSteps) {
     if (!tools.contains(s.tool)) tools.add(s.tool);
     if (s.isError) failed.add(s.tool);
   }
   final b = StringBuffer()
-    ..writeln('【结论】未能形成判断：本次任务跑满 ${steps.length} 步工具调用，但模型没有给出结论。')
-    ..writeln('【证据】共调用 ${steps.length} 次工具（成功 $okCount 次），涉及：${tools.join('、')}。');
-  for (final s in steps.where((s) => !s.isError).take(4)) {
+    ..writeln('【结论】未能形成判断：本次任务跑了 ${toolSteps.length} 步工具调用，但模型没有给出结论。')
+    ..writeln('【证据】共调用 ${toolSteps.length} 次工具（成功 $okCount 次），涉及：${tools.join('、')}。');
+  for (final s in toolSteps.where((s) => !s.isError).take(4)) {
     b.writeln('- ${s.tool}：${_clip(s.output.replaceAll(String.fromCharCode(10), ' '), 200)}');
   }
   if (failed.isNotEmpty) {
@@ -159,10 +170,14 @@ class SubAgentRunner {
   /// 同批的其他子智能体，供 `ask_peer` 互相提问。
   final List<SubAgent> peers;
 
-  /// 运行期通过 `request_capability` 获批的工具名。
+  /// 运行期通过 `request_capability` 获批的工具名，按子智能体 id 分桶。
   ///
-  /// 和清水 1.4.2 的做法一致：获批后直接追加进本轮后续步骤，不用重开任务。
-  final Set<String> _grantedTools = <String>{};
+  /// 必须分桶：`discuss()` 复用同一个 runner 顺序跑多个 agent，如果只用一个
+  /// 全局 Set，一个申请了 `workspace_write_file` 的 agent 获批之后，
+  /// 紧随其后那个本该只读的 agent 也会拿到写权限 —— 这是越权。
+  final Map<String, Set<String>> _grantedByAgent = <String, Set<String>>{};
+
+  Set<String> _grantedFor(SubAgent agent) => _grantedByAgent.putIfAbsent(agent.id, () => <String>{});
 
   /// 单个任务最多几轮工具来回。
   static const maxSteps = 24;
@@ -234,7 +249,7 @@ class SubAgentRunner {
       onPeerBudget: () => peerBudget > 0 ? (peerBudget -= 1) >= 0 : false,
       onMainBudget: () => mainBudget > 0 ? (mainBudget -= 1) >= 0 : false,
       onCapBudget: () => capBudget > 0 ? (capBudget -= 1) >= 0 : false,
-      granted: _grantedTools,
+      granted: _grantedFor(agent),
     );
     var usable = model.tools ? tools : const <AppTool>[];
     final ai = providerFor(provider);
@@ -283,7 +298,7 @@ class SubAgentRunner {
     for (var step = 0; step < maxSteps; step++) {
       if (_cancel.isCancelled) break;
       // request_capability 获批的工具要能从下一步起就用上，所以每轮重算工具表。
-      if (step > 0 && _grantedTools.isNotEmpty) {
+      if (step > 0 && _grantedFor(agent).isNotEmpty) {
         usable = model.tools
             ? _toolsFor(
                 agent,
@@ -291,7 +306,7 @@ class SubAgentRunner {
                 onPeerBudget: () => peerBudget > 0 ? (peerBudget -= 1) >= 0 : false,
                 onMainBudget: () => mainBudget > 0 ? (mainBudget -= 1) >= 0 : false,
                 onCapBudget: () => capBudget > 0 ? (capBudget -= 1) >= 0 : false,
-                granted: _grantedTools,
+                granted: _grantedFor(agent),
               )
             : const <AppTool>[];
         params = GenerationParams(
@@ -386,7 +401,13 @@ class SubAgentRunner {
       // 而不是把它看不懂的工具原文直接倒过去。
       output = _fallbackDigest(steps);
     }
-    publish(failure.isEmpty ? (output.isEmpty ? 'failed' : 'done') : 'failed', force: true, overrideOutput: output);
+    // 被取消不能报「完成」：界面会显示 done，而 result.cancelled 是 true，两边对不上。
+    final cancelledNow = _cancel.isCancelled;
+    publish(
+      cancelledNow ? 'cancelled' : (failure.isEmpty ? (output.isEmpty ? 'failed' : 'done') : 'failed'),
+      force: true,
+      overrideOutput: output,
+    );
     final result = SubAgentResult(
       agent: agent.name,
       task: text,
@@ -502,7 +523,8 @@ class SubAgentRunner {
             break;
           }
         }
-        if (t != null && !readOnlyBlockedTools.contains(name)) {
+        // 双保险：即便这个 agent 有获批记录，只要它是只读的就别给写工具。
+        if (t != null && !(agent.readOnly && readOnlyBlockedTools.contains(name))) {
           list.add(t);
           have.add(name);
         }
@@ -614,7 +636,7 @@ class SubAgentRunner {
       if (self.readOnly && readOnlyBlockedTools.contains(name)) {
         return jsonEncode({'ok': false, 'error': '你是只读子智能体，不能申请写操作工具', 'tool': name});
       }
-      _grantedTools.add(name);
+      _grantedFor(self).add(name);
       ctx.onProgress?.call('${self.name} · 获批 $name');
       return jsonEncode({'ok': true, 'tool': name, 'note': '已开通，从下一步起可用', if (reason.isNotEmpty) 'reason': reason});
     },

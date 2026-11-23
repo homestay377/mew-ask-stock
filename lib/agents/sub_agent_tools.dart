@@ -122,6 +122,8 @@ ${subAgentCatalog(agents)}''',
         globalCancel: ctx.cancel,
         tokenBudget: args['token_budget'] is int ? args['token_budget'] as int : null,
       );
+      // 板已经收尾：从注册表摘掉，别让 SubAgentResult 全文一直挂着。
+      _boards.remove(_keyOf(ctx));
 
       final payload = <String, dynamic>{
         'title': board.title,
@@ -185,7 +187,8 @@ AppTool _discussTool(List<SubAgent> agents) {
         return jsonEncode({'error': '没有可参与讨论的子智能体', 'unknown_agents': unknown, 'available': names});
       }
       final chosen = picked.take(4).toList();
-      final rounds = args['rounds'] is int ? args['rounds'] as int : 2;
+      // 先夹再传：原来只夹了回显，模型传 50 就真跑 50 轮 x 4 个 agent。
+      final rounds = (args['rounds'] is int ? args['rounds'] as int : 2).clamp(1, 5);
       final runner = SubAgentRunner(
         ToolRunContext(
           settings: ctx.settings,
@@ -201,7 +204,7 @@ AppTool _discussTool(List<SubAgent> agents) {
       final turns = await runner.discuss(chosen, topic, rounds: rounds);
       return jsonEncode({
         'topic': topic,
-        'rounds': rounds.clamp(1, 5),
+        'rounds': rounds,
         'participants': [for (final a in chosen) a.name],
         'ok': turns.isNotEmpty && turns.every((r) => r.ok),
         'turns': [
@@ -273,13 +276,22 @@ ${subAgentCatalog(agents)}''',
       }
       // 已存在的 id 不能被覆盖
       final existing = <String>{for (final t in board.tasks) t.id};
+      // 分配 id 时必须把「本批已分配的」也算进去，否则板上是 t1/t5/t3 时
+      // 追加两条会得到 t4 和 t5——t5 与已有 id 撞车，byId 就解析到错的 task。
+      final taken = <String>{...existing};
       final preFixed = <dynamic>[];
       for (final row in rows) {
         final m = Map<String, dynamic>.from(asMap(row));
-        final id = asStr(m['task_id']).trim();
-        if (id.isEmpty || existing.contains(id)) {
-          m['task_id'] = 't${board.tasks.length + preFixed.length + 1}';
+        var id = asStr(m['task_id']).trim();
+        if (id.isEmpty || taken.contains(id)) {
+          var n = board.tasks.length + preFixed.length + 1;
+          while (taken.contains('t$n')) {
+            n++;
+          }
+          id = 't$n';
         }
+        taken.add(id);
+        m['task_id'] = id;
         preFixed.add(m);
       }
       final parsed = parseAssignments(preFixed, agents, knownIds: existing);
