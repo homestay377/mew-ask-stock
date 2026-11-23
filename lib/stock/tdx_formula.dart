@@ -318,8 +318,12 @@ class _Parser {
       return _Node(_NK.variable, text: name);
     }
     if (tk.kind == _Kind.str) {
+      // 字符串字面量以前直接把内容丢掉了（只返回 0）：
+      // 于是 CODELIKE('300') / NAMELIKE('ST') 拿不到参数，永远算不出东西。
+      final raw = tk.text;
       eat();
-      return _Node(_NK.num, value: 0.0);
+      final unquoted = raw.replaceAll(RegExp(r'''^['"]+'''), '').replaceAll(RegExp(r'''['"]+$'''), '');
+      return _Node(_NK.num, value: 0.0, text: unquoted);
     }
     // 兜底：吞掉避免死循环
     eat();
