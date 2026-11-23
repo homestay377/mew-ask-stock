@@ -8,6 +8,7 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart' show rootBundle;
 
+import '../core/util.dart';
 import '../stock/chanlun.dart';
 import '../stock/chart_shapes.dart';
 import '../stock/data_quality.dart';
