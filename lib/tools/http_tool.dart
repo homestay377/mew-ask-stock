@@ -83,7 +83,9 @@ Future<http.StreamedResponse> _send(
     req.headers['User-Agent'] =
         'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36';
   }
-  if (body != null) req.bodyBytes = utf8.encode(body);
+  if (body != null) {
+    req.bodyBytes = utf8.encode(body);
+  }
   return Net.sendRequest(req);
 }
 
@@ -216,7 +218,9 @@ AppTool buildHttpTool() {
         }
         var text = utf8.decode(out, allowMalformed: true);
         final clipped = text.length > maxChars;
-        if (clipped) text = text.substring(0, maxChars);
+        if (clipped) {
+          text = text.substring(0, maxChars);
+        }
         return jsonEncode({
           'ok': res.statusCode >= 200 && res.statusCode < 400,
           'status': res.statusCode,

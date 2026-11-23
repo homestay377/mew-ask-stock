@@ -62,7 +62,9 @@ class TeamTask {
       liveOut = tk['out'] is num ? (tk['out'] as num).toInt() : liveOut;
     }
     final ms = snap['ms'];
-    if (ms is num) liveMs = ms.toInt();
+    if (ms is num) {
+      liveMs = ms.toInt();
+    }
   }
 
   bool get hasLive => liveOutput.isNotEmpty || liveSteps.isNotEmpty || liveMs > 0;
@@ -143,7 +145,9 @@ class TeamBoard {
         // 还在跑的任务也计入，界面上的合计才是「到现在为止」而不是「完成之后」。
         tokensIn += t.liveIn;
         tokensOut += t.liveOut;
-        if (t.liveMs > elapsed) elapsed = t.liveMs;
+        if (t.liveMs > elapsed) {
+          elapsed = t.liveMs;
+        }
       }
     }
     return {
@@ -364,8 +368,12 @@ bool isTeamTaskRunning(String runKey) => _runningTasks.containsKey(runKey);
       continue;
     }
     var id = asStr(m['task_id']).trim();
-    if (id.isEmpty) id = 't${i + 1}';
-    if (id.length > 12) id = id.substring(0, 12);
+    if (id.isEmpty) {
+      id = 't${i + 1}';
+    }
+    if (id.length > 12) {
+      id = id.substring(0, 12);
+    }
     if (!seenIds.add(id)) {
       problems.add('任务 id 重复：$id，已改用 t${i + 1}');
       id = 't${i + 1}';

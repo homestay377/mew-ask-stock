@@ -275,7 +275,9 @@ class SubAgentRunner {
           round.add(chunk);
           // 逐段推送：拿到文本就更新 liveText，按节流推给界面。
           final live = _textOf(round.parts);
-          if (live.isNotEmpty) lastText = live;
+          if (live.isNotEmpty) {
+            lastText = live;
+          }
           publish('running');
         }
       } catch (e) {
@@ -285,7 +287,9 @@ class SubAgentRunner {
       usage = usage + round.usage;
       // 工具轮通常没有正文；别让空字符串把流式期间已经显示的文本清掉。
       final roundText = _textOf(round.parts);
-      if (roundText.trim().isNotEmpty) lastText = roundText;
+      if (roundText.trim().isNotEmpty) {
+        lastText = roundText;
+      }
       final pending = round.pendingTools;
       if (pending.isEmpty) {
         msgs.add(ChatMessage(role: Role.assistant, parts: round.parts));
@@ -310,7 +314,9 @@ class SubAgentRunner {
         }
         sw.stop();
         final idx = round.parts.indexWhere((p) => identical(p, call));
-        if (idx >= 0) round.parts[idx] = call.copyWith(output: out, isError: isError);
+        if (idx >= 0) {
+          round.parts[idx] = call.copyWith(output: out, isError: isError);
+        }
         steps.add(
           SubAgentStep(
             tool: call.name,
@@ -456,7 +462,9 @@ class SubAgentRunner {
     }
     if (allowPeers && onPeerBudget != null) {
       final others = peers.where((p) => p.usable && p.id != agent.id).toList();
-      if (others.isNotEmpty) list = [...list, _askPeerTool(agent, others, onPeerBudget)];
+      if (others.isNotEmpty) {
+        list = [...list, _askPeerTool(agent, others, onPeerBudget)];
+      }
     }
     if (onMainBudget != null) {
       list = [...list, _askMainTool(agent, onMainBudget)];

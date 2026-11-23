@@ -149,9 +149,15 @@ class _TeamSheetState extends State<_TeamSheet> {
       final b = _boardOf(p);
       if (b == null) continue;
       boards++;
-      if (b['tokens_in'] is num) tokIn += (b['tokens_in'] as num).toInt();
-      if (b['tokens_out'] is num) tokOut += (b['tokens_out'] as num).toInt();
-      if (b['elapsed_ms'] is num) ms += (b['elapsed_ms'] as num).toInt();
+      if (b['tokens_in'] is num) {
+        tokIn += (b['tokens_in'] as num).toInt();
+      }
+      if (b['tokens_out'] is num) {
+        tokOut += (b['tokens_out'] as num).toInt();
+      }
+      if (b['elapsed_ms'] is num) {
+        ms += (b['elapsed_ms'] as num).toInt();
+      }
     }
     return (tokIn: tokIn, tokOut: tokOut, ms: ms, boards: boards);
   }
