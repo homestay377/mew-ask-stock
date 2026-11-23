@@ -193,6 +193,7 @@ class Quote {
     this.turnover,
     this.floatCap,
     this.totalCap,
+    this.fallbackReason,
   });
 
   final String symbol;
@@ -210,6 +211,11 @@ class Quote {
   final double? pe;
   final double? pb;
 
+  /// 主源失败时的降级原因（腾讯 → 新浪 → 东财）。
+  ///
+  /// 东财是**延迟行情**，字段一样但时效不同；不标出来模型会把延迟价当实时价用。
+  final String? fallbackReason;
+
   /// 换手率（%）
   final double? turnover;
 
@@ -219,7 +225,33 @@ class Quote {
 
   double get change => price - prevClose;
   double get changePct => prevClose == 0 ? 0 : (price - prevClose) / prevClose * 100;
+
+  /// 只改来源标记，其余字段原样带上。
+  Quote withFallback(String reason) => Quote(
+    symbol: symbol,
+    name: name,
+    price: price,
+    prevClose: prevClose,
+    open: open,
+    high: high,
+    low: low,
+    volume: volume,
+    amount: amount,
+    time: time,
+    pe: pe,
+    pb: pb,
+    turnover: turnover,
+    floatCap: floatCap,
+    totalCap: totalCap,
+    fallbackReason: reason,
+  );
+
+  /// 这份快照是不是延迟行情（东财备源）。
+  bool get delayed => fallbackReason != null;
 }
+
+/// 数据源优先级以下表为准：`docs/data-source-priority.md`
+/// 简版：腾讯（不封 IP） → 新浪 → 东财（**会封 IP**，只用于它独有的数据）。
 
 const _ua = 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36';
 
@@ -599,14 +631,72 @@ class StockSource {
 
   // ------------------------------------------------------------ 实时快照
 
-  /// 实时快照。腾讯 GBK 接口优先，失败回退东财延迟行情。
+  /// 实时快照。优先级与 K 线保持一致：**腾讯 → 新浪 → 东财**。
+  ///
+  /// 原来只有腾讯 → 东财两级，而东财是延迟行情、且在封 IP 风险表里排最末——
+  /// 等于把最不稳的源当成了唯一的备选。新浪快照是实时的，插在中间。
+  ///
+  /// 降级成功会写 [Quote.fallbackReason]：模型据此判断这是不是延迟价。
   Future<Quote> quote(String symbol) async {
     final code = normalize(symbol);
-    try {
-      return await _quoteTencent(code);
-    } on StockDataError {
-      return await _quoteEastmoney(code);
+    final errors = <String>[];
+    for (final fetcher in <Future<Quote> Function()>[
+      () => _quoteTencent(code),
+      () => _quoteSina(code),
+      () => _quoteEastmoney(code),
+    ]) {
+      try {
+        final q = await _retryOnceQuote(fetcher);
+        return errors.isEmpty ? q : q.withFallback(errors.join('；'));
+      } catch (e) {
+        errors.add('$e');
+      }
     }
+    throw StockDataError('快照源都失败了：${errors.join('；')}');
+  }
+
+  /// 同源重试一次再降级（与 K 线一致）。
+  Future<Quote> _retryOnceQuote(Future<Quote> Function() fetcher) async {
+    Object? last;
+    for (var i = 0; i <= sourceRetries; i++) {
+      try {
+        return await fetcher();
+      } catch (e) {
+        last = e;
+        final msg = '$e';
+        if (msg.contains('不支持') || msg.contains('非法') || msg.contains('无法识别')) break;
+        if (i < sourceRetries) {
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+        }
+      }
+    }
+    throw last ?? StockDataError('未知错误');
+  }
+
+  /// 新浪实时快照（GBK）。
+  ///
+  /// 字段顺序：名称,今开,昨收,现价,最高,最低,买一,卖一,成交量(股),成交额(元),…
+  /// 第 30 位是日期、31 位是时间。
+  Future<Quote> _quoteSina(String code) async {
+    final body = await _gbkText('https://hq.sinajs.cn/list=$code', referer: 'https://finance.sina.com.cn/');
+    final m = RegExp(r'="([^"]*)"').firstMatch(body);
+    final raw = m?.group(1) ?? '';
+    final f = raw.split(',');
+    if (f.length < 32 || f[0].isEmpty) throw StockDataError('新浪快照返回为空');
+    double num_(int i) => double.tryParse(f[i]) ?? 0;
+    return Quote(
+      symbol: code,
+      name: f[0],
+      open: num_(1),
+      prevClose: num_(2),
+      price: num_(3),
+      high: num_(4),
+      low: num_(5),
+      // 新浪成交量单位是「股」，腾讯是「手」：除以 100 统一成手。
+      volume: num_(8) / 100,
+      amount: num_(9) == 0 ? null : num_(9),
+      time: f.length > 31 ? '${f[30]} ${f[31]}' : null,
+    );
   }
 
   Future<Quote> _quoteTencent(String code) async {

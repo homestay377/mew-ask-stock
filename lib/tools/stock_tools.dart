@@ -386,6 +386,9 @@ List<AppTool> buildStockTools({bool enabled = true}) {
             'time': q.time,
             // 腾讯给的是 20261120161454 这种 14 位串，直接读没法看
             'as_of': _fmtStamp14(q.time),
+            // 降级到备源会标出来：东财是延迟行情，不能当实时价用。
+            if (q.fallbackReason != null) 'degraded_reason': q.fallbackReason,
+            if (q.delayed) 'note': '这份快照来自备源（东财延迟行情），不是实时价',
           });
         } catch (e) {
           return jsonEncode({'error': '$e'});

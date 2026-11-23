@@ -6,6 +6,8 @@ import '../core/util.dart';
 
 /// 市场层面的数据源：指数、板块、资金面、涨停池、龙虎榜、热门榜。
 ///
+/// 完整优先级表见 `docs/data-source-priority.md`（唯一权威）。
+///
 /// ## 为什么这么排优先级
 ///
 /// 参考 `a-stock-data` 的封 IP 风险表（实测验证）：
