@@ -178,7 +178,7 @@ class StockPanelState extends ChangeNotifier {
     try {
       final quote = await sharedStockSource.quote(symbol);
       final n = quote.name.trim();
-      if (n == null || n.isEmpty) return;
+      if (n.isEmpty) return;
       if (_symbol != symbol) return;
       _name = n;
       notifyListeners();
