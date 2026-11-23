@@ -79,36 +79,85 @@ List<AppTool> buildStockTools({bool enabled = true}) {
   return [
     AppTool(
       name: 'market_overview',
-      displayName: '大盘与板块',
-      description: '''看今天的市场环境：三大指数涨跌 + 板块涨幅榜/跌幅榜（带主力净流入）。
-这是市场层数据，不是个股数据；要判断某只票的强弱仍需 stock_kline / analyze_chan。
+      displayName: '大盘与市场',
+      description: '''看今天的市场全貌。可选模块（默认全开）：
+- indices：上证/深成/创业板/科创50（数据走腾讯，不封 IP）
+- sectors：板块涨幅榜或跌幅榜，带主力净流入（东财）
+- limit_up：涨停家数与涨停股列表，含连板数（东财）
+- margin：最近几日两市融资融券余额（东财）
+- billboard：最近一个交易日龙虎榜（东财）
+- hot：热门榜——东财人气榜 + 同花顺热榜（带题材归因）
 
-明确边界：只有指数与板块，**没有**涨停家数、连板梯队、赚钱效应、新闻资讯——这些数据源当前取不到，
-不要用板块涨幅反推「今天有几个涨停」。板块判断必须写清是从哪个榜推出来的。''',
+只做实测确认可用的接口。每个数字都带 as_of 或 date，盘中数据会变。
+取不到的模块会在 errors 里写明原因（多为东财限流），**不要用别的模块的数据反推**。''',
       parameters: objectSchema({
-        'direction': strProp('榜单方向', enumValues: ['up', 'down']),
-        'limit': intProp('每个榜返回多少条，默认 8，上限 20'),
+        'modules': {
+          'type': 'array',
+          'items': {'type': 'string'},
+          'description': '要哪些模块，可选 indices/sectors/limit_up/margin/billboard/hot；留空表示全开',
+        },
+        'sector_direction': strProp('板块榜方向', enumValues: ['up', 'down']),
+        'limit': intProp('每类返回条数，默认 8，上限 20'),
       }),
       promptHint:
-          '回答市场问题时，指数与板块数字必须来自这个工具，不要凭印象说「今天普涨」。'
-          '每个数字都带 as_of，要注明是盘中还是收盘后。'
-          '取不到就说取不到（error 字段会说明是否被限流），绝对不要用板块涨幅去反推涨停家数这类指标。',
+          '市场问题里的指数、板块、涨停数、两融、龙虎榜、热榜数字必须来自这个工具，不要凭印象说「今天普涨」。'
+          '每个数字都要注明时间（as_of / date）与来源模块名。'
+          'errors 里出现的模块就是取不到，如实说明，不要用板块涨幅去反推涨停家数这类指标。'
+          '注意：北向资金的逐日净额接口当前返回全 0（额度披露已停），不要把它当有效数据用。',
       execute: (args) async {
-        final dir = asStr(args['direction']).trim().toLowerCase() == 'down' ? false : true;
+        final wanted = asList(args['modules'])
+            .map((e) => asStr(e).trim().toLowerCase())
+            .where((e) => e.isNotEmpty)
+            .toSet();
+        bool on(String name) => wanted.isEmpty || wanted.contains(name);
+        final dir = asStr(args['sector_direction']).trim().toLowerCase() == 'down' ? false : true;
         final limit = (args['limit'] is int ? args['limit'] as int : 8).clamp(1, 20).toInt();
-        final idx = await market.indexSnapshot();
-        final top = await market.sectors(descending: dir, limit: limit);
-        return jsonEncode({
-          'indices': idx.items,
-          if (idx.error != null) 'indices_error': idx.error,
-          'sectors_title': dir ? '涨幅榜' : '跌幅榜',
-          'sectors': top.items,
-          'sector_total': top.total,
-          if (top.error != null) 'sectors_error': top.error,
-          'source': '东方财富 push2（免费接口，无 SLA，可能限流）',
-          'unavailable': ['涨停家数', '连板梯队', '赚钱效应', '新闻资讯'],
-          if (idx.error != null || top.error != null) 'note': '有接口返回失败，说明缺的那部分；不要把缺失当成「没有」。',
-        });
+
+        final errors = <String, String>{};
+        final payload = <String, dynamic>{
+          'source': {'indices': '腾讯 qt.gtimg.cn（不封 IP）', 'others': '东方财富（有风控，已串行限流）'},
+        };
+
+        if (on('indices')) {
+          final r = await market.indices();
+          payload['indices'] = r.items;
+          if (r.error != null) errors['indices'] = r.error!;
+        }
+        if (on('sectors')) {
+          final r = await market.sectors(descending: dir, limit: limit);
+          payload['sectors_title'] = dir ? '涨幅榜' : '跌幅榜';
+          payload['sectors'] = r.items;
+          payload['sector_total'] = r.total;
+          if (r.error != null) errors['sectors'] = r.error!;
+        }
+        if (on('limit_up')) {
+          final r = await market.limitUpPool(limit: limit);
+          payload['limit_up_count'] = r.count;
+          payload['limit_up'] = r.items;
+          if (r.error != null) errors['limit_up'] = r.error!;
+        }
+        if (on('margin')) {
+          final r = await market.margin(limit: 3);
+          payload['margin'] = r.items;
+          if (r.error != null) errors['margin'] = r.error!;
+        }
+        if (on('billboard')) {
+          final r = await market.billboard(limit: limit);
+          payload['billboard'] = r.items;
+          if (r.error != null) errors['billboard'] = r.error!;
+        }
+        if (on('hot')) {
+          final ths = await market.popularityThs(limit: limit);
+          payload['hot_ths'] = ths.items;
+          if (ths.error != null) errors['hot_ths'] = ths.error!;
+          final east = await market.popularityEast(limit: limit);
+          payload['hot_east'] = east.items;
+          if (east.error != null) errors['hot_east'] = east.error!;
+        }
+
+        if (errors.isNotEmpty) payload['errors'] = errors;
+        payload['unavailable'] = ['北向资金逐日净额（接口返回全 0，额度披露已停）', '连板梯队细分（只有每只股的连板数）'];
+        return jsonEncode(payload);
       },
     ),
     AppTool(
