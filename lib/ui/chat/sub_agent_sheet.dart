@@ -123,6 +123,39 @@ class _TeamSheetState extends State<_TeamSheet> {
     return (status: t('待命', 'idle'), detail: null);
   }
 
+  /// 某次工具调用对应的任务板（meta 优先，退回 output）。
+  Map<String, dynamic>? _boardOf(ToolPart p) {
+    final meta = p.meta?['board'];
+    if (meta is Map) {
+      final m = asMap(meta);
+      if (m['tasks'] is List) return m;
+    }
+    final raw = p.output;
+    if (raw == null) return null;
+    final j = tryJsonDecode(raw);
+    if (j is! Map) return null;
+    final b = asMap(j)['board'];
+    if (b is Map && asMap(b)['tasks'] is List) return asMap(b);
+    return null;
+  }
+
+  /// 整段对话里所有分派的累计消耗（对齐清水的「本次合计」）。
+  ({int tokIn, int tokOut, int ms, int boards}) get _totals {
+    var tokIn = 0;
+    var tokOut = 0;
+    var ms = 0;
+    var boards = 0;
+    for (final p in _toolParts) {
+      final b = _boardOf(p);
+      if (b == null) continue;
+      boards++;
+      if (b['tokens_in'] is num) tokIn += (b['tokens_in'] as num).toInt();
+      if (b['tokens_out'] is num) tokOut += (b['tokens_out'] as num).toInt();
+      if (b['elapsed_ms'] is num) ms += (b['elapsed_ms'] as num).toInt();
+    }
+    return (tokIn: tokIn, tokOut: tokOut, ms: ms, boards: boards);
+  }
+
   int get _runningCount => _boardTasks.where((row) => asStr(row['status']) == 'running').length;
 
   int get _pendingCount => _boardTasks.where((row) => asStr(row['status']) == 'pending').length;
@@ -345,8 +378,27 @@ class _TeamSheetState extends State<_TeamSheet> {
       children: [
         if (_runningCount > 0) _pill(context, t('$_runningCount 个运行中', '$_runningCount running'), scheme.primary),
         if (_pendingCount > 0) _pill(context, t('$_pendingCount 个等待前置', '$_pendingCount waiting'), scheme.outline),
+        () {
+          final tot = _totals;
+          if (tot.tokIn == 0 && tot.tokOut == 0) return const SizedBox.shrink();
+          return Text(
+            '${t('本次合计 ', 'total ')}↑${formatTokens(tot.tokIn)} ↓${formatTokens(tot.tokOut)}'
+            ' · ${formatTokens(tot.tokIn + tot.tokOut)} tokens'
+            '${tot.ms > 0 ? ' · ${_duration(tot.ms)}' : ''}',
+            style: style,
+          );
+        }(),
       ],
     );
+  }
+
+  String _duration(int ms) {
+    if (ms >= 60000) {
+      final m = ms ~/ 60000;
+      final s = (ms % 60000) ~/ 1000;
+      return '${m}m${s}s';
+    }
+    return '${(ms / 1000).toStringAsFixed(1)}s';
   }
 
   Widget _pill(BuildContext context, String text, Color color) => Container(
@@ -382,6 +434,8 @@ class _TeamSheetState extends State<_TeamSheet> {
     final depList = deps is List ? deps.map(asStr).where((e) => e.isNotEmpty).toList() : const <String>[];
     final output = asStr(task['output']);
     final error = asStr(task['error']);
+    final stepsRaw = task['steps'];
+    final stepCount = stepsRaw is List ? stepsRaw.length : 0;
     final running = status == 'running';
     final color = _statusColor(status, scheme);
     final head = asStr(task['task']).replaceAll('\n', ' ').trim();
@@ -429,6 +483,17 @@ class _TeamSheetState extends State<_TeamSheet> {
               const SizedBox(height: 6),
               Text('${asStr(task['id'])} · ${asStr(task['agent'])}', style: style),
               if (depList.isNotEmpty) Text('${t('依赖', 'depends on')}：${depList.join('、')}', style: style),
+              if (running && output.trim().isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    output.replaceAll(RegExp(r'\s+'), ' '),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: style?.copyWith(color: scheme.onSurface, height: 1.35),
+                  ),
+                ),
+              if (stepCount > 0 && running) Text('${t('已跑', 'steps run')} $stepCount', style: style),
               if (error.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),

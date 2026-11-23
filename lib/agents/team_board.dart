@@ -27,6 +27,42 @@ class TeamTask {
   String? error;
   int elapsedMs = 0;
 
+  // ---- 实时态：跑的时候就有内容，不必等 result ----
+  /// 子智能体自己报的阶段：running / done / failed。
+  String liveStatus = '';
+
+  /// 当前已经写出来的文本（逐段刷新）。
+  String liveOutput = '';
+
+  /// 已经执行过的工具步骤。
+  List<Map<String, dynamic>> liveSteps = const [];
+  int liveIn = 0;
+  int liveOut = 0;
+  int liveMs = 0;
+
+  /// 收下 [SubAgentRunner.onLive] 推来的快照。
+  void applyLive(Map<String, dynamic> snap) {
+    final st = asStr(snap['status']);
+    if (st.isNotEmpty) liveStatus = st;
+    final out = asStr(snap['output']);
+    if (out.isNotEmpty) liveOutput = out;
+    final steps = snap['steps'];
+    if (steps is List)
+      liveSteps = [
+        for (final e in steps)
+          if (e is Map) asMap(e),
+      ];
+    final tk = snap['tokens'];
+    if (tk is Map) {
+      liveIn = tk['in'] is num ? (tk['in'] as num).toInt() : liveIn;
+      liveOut = tk['out'] is num ? (tk['out'] as num).toInt() : liveOut;
+    }
+    final ms = snap['ms'];
+    if (ms is num) liveMs = ms.toInt();
+  }
+
+  bool get hasLive => liveOutput.isNotEmpty || liveSteps.isNotEmpty || liveMs > 0;
+
   bool get isTerminal =>
       status == TeamTaskStatus.done || status == TeamTaskStatus.failed || status == TeamTaskStatus.skipped;
 
@@ -39,12 +75,13 @@ class TeamTask {
     // 任务原文要带上：界面在任务还没产出时要靠它显示「这条在干什么」。
     'task': task,
     if (result != null) 'ok': result!.ok,
-    if (result != null) 'output': result!.output,
+    'output': result?.output ?? liveOutput,
     if (error != null) 'error': error,
-    'ms': elapsedMs,
-    if (result != null) 'steps': [for (final s in result!.steps) s.toJson()],
-    if (result != null) 'tokens': {'input': result!.usage.input, 'output': result!.usage.output},
-    if (result != null) 'step_count': result!.steps.length,
+    'ms': result != null ? elapsedMs : liveMs,
+    'steps': result != null ? [for (final s in result!.steps) s.toJson()] : liveSteps,
+    'tokens': {'input': result?.usage.input ?? liveIn, 'output': result?.usage.output ?? liveOut},
+    'step_count': result != null ? result!.steps.length : liveSteps.length,
+    if (liveStatus.isNotEmpty) 'live_status': liveStatus,
   };
 }
 
@@ -97,8 +134,13 @@ class TeamBoard {
       if (t.result != null) {
         tokensIn += t.result!.usage.input;
         tokensOut += t.result!.usage.output;
+        elapsed += t.elapsedMs;
+      } else {
+        // 还在跑的任务也计入，界面上的合计才是「到现在为止」而不是「完成之后」。
+        tokensIn += t.liveIn;
+        tokensOut += t.liveOut;
+        if (t.liveMs > elapsed) elapsed = t.liveMs;
       }
-      elapsed += t.elapsedMs;
     }
     return {
       'title': title,
@@ -238,7 +280,16 @@ Future<void> _runOne(
   _runningTasks[runKey] = local;
   final g = globalCancel;
   if (g != null) unawaited(g.future.then((_) => local.cancel()));
-  final taskRunner = SubAgentRunner(runner.ctx, peers: runner.peers, cancelOverride: local);
+  final taskRunner = SubAgentRunner(
+    runner.ctx,
+    peers: runner.peers,
+    cancelOverride: local,
+    // 逐段把子智能体写的东西写进任务板，并立刻推给界面。
+    onLive: (snap) {
+      t.applyLive(snap);
+      onBoard?.call();
+    },
+  );
   final sw = Stopwatch()..start();
   try {
     final r = await taskRunner.run(agent, t.task, extraContext: board.briefFor(t));

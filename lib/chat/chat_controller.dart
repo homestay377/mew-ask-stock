@@ -587,8 +587,10 @@ class ChatController extends ChangeNotifier {
       // 子智能体的过程行写进 ToolPart.meta.progress：还在跑的时候界面就能看到它在干什么。
       final progress = <String>[];
       void pushProgress(String line) {
-        if (progress.length >= 12) return;
+        // 早先这里是「满 12 行就 return」——结果跑到第 12 行之后界面再也不刷新，
+        // 长任务看起来就像卡死了。改成滚动窗口：永远保留最后 12 行，但每次都推。
         progress.add(line);
+        if (progress.length > 12) progress.removeRange(0, progress.length - 12);
         final i = acc.parts.indexWhere((p) => p is ToolPart && p.callId == call.callId);
         if (i < 0) return;
         final tp = acc.parts[i] as ToolPart;

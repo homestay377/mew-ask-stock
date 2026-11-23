@@ -452,6 +452,22 @@ class _SubAgentTrace extends StatelessWidget {
         : const <String>[];
     final text = asStr(row['task']).replaceAll('\n', ' ').trim();
     final short = text.length <= 56 ? text : '${text.substring(0, 56)}…';
+    final rawOutput = asStr(row['output']).trim();
+    final liveText = running ? rawOutput.replaceAll(RegExp(r'\s+'), ' ') : '';
+    final steps = row['steps'];
+    final stepLines = <String>[];
+    if (steps is List) {
+      for (final e in steps.reversed) {
+        if (e is! Map) continue;
+        final m = asMap(e);
+        final tool = asStr(m['tool']);
+        if (tool.isEmpty) continue;
+        final ok = m['ok'] == true;
+        final ms = m['ms'] is num ? (m['ms'] as num).toInt() : 0;
+        stepLines.insert(0, '· $tool ${ok ? '✓' : '✗'}${ms > 0 ? ' ${ms}ms' : ''}');
+        if (stepLines.length >= 2) break;
+      }
+    }
     final running = status == 'running';
     final color = switch (status) {
       'running' => scheme.primary,
@@ -492,6 +508,23 @@ class _SubAgentTrace extends StatelessWidget {
                 Text(short, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(height: 1.3)),
                 Text('${asStr(row['id'])} · ${asStr(row['agent'])}', style: style),
                 if (deps.isNotEmpty) Text('${t('依赖', 'depends on')}：${deps.join('、')}', style: style),
+                // 实时内容：它在写什么（逐段刷新，最多两行）
+                if (liveText.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      liveText,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: style?.copyWith(color: scheme.onSurface, height: 1.35),
+                    ),
+                  ),
+                // 已经跑过的工具步骤（只看最后两条，完整列表在展开区）
+                if (stepLines.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(stepLines.join('\n'), maxLines: 2, overflow: TextOverflow.ellipsis, style: style),
+                  ),
                 if (asStr(row['error']).isNotEmpty)
                   Text(
                     asStr(row['error']),

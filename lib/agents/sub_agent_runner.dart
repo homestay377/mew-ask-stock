@@ -116,7 +116,16 @@ String _fallbackDigest(List<SubAgentStep> steps) {
 /// 和参考实现（ds7891/- 的 Kotlin 版）的关系：结构与预算一致，代码是按
 /// MewHub 的 Dart 接口重写的，不是移植。
 class SubAgentRunner {
-  SubAgentRunner(this.ctx, {this.peers = const [], this.cancelOverride});
+  SubAgentRunner(this.ctx, {this.peers = const [], this.cancelOverride, this.onLive});
+
+  /// 实时过程回调：子智能体每吐一段文本、每跑完一个工具就推一次。
+  ///
+  /// 与清水的 `SubAgentLiveStore` 同频（120ms 节流）：界面据此逐字显示
+  /// 它现在在写什么、做到第几步，而不是等整个任务结束。
+  final void Function(Map<String, dynamic> snapshot)? onLive;
+
+  /// 两次实时推送的最小间隔，对齐清水的 LIVE_PUBLISH_INTERVAL_MS。
+  static const liveIntervalMs = 120;
 
   final ToolRunContext ctx;
 
@@ -213,6 +222,27 @@ class SubAgentRunner {
     var usage = const TokenUsage();
     final steps = <SubAgentStep>[];
     var lastText = '';
+    var lastPublish = 0;
+    final startedAt = DateTime.now();
+
+    /// 把当前状态推给界面；流式期间按 [liveIntervalMs] 节流。
+    void publish(String status, {bool force = false, String? overrideOutput}) {
+      final cb = onLive;
+      if (cb == null) return;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (!force && now - lastPublish < liveIntervalMs) return;
+      lastPublish = now;
+      cb({
+        'agent': agent.name,
+        'status': status,
+        'output': overrideOutput ?? lastText,
+        'steps': [for (final s in steps) s.toJson()],
+        'tokens': {'in': usage.input, 'out': usage.output},
+        'ms': DateTime.now().difference(startedAt).inMilliseconds,
+      });
+    }
+
+    publish('running', force: true);
     var failure = '';
     var byName = {for (final t in usable) t.name: t};
     ctx.onProgress?.call('${agent.name} · 开工');
@@ -243,13 +273,19 @@ class SubAgentRunner {
       try {
         await for (final chunk in ai.stream(msgs, params, cancel: _cancel)) {
           round.add(chunk);
+          // 逐段推送：拿到文本就更新 liveText，按节流推给界面。
+          final live = _textOf(round.parts);
+          if (live.isNotEmpty) lastText = live;
+          publish('running');
         }
       } catch (e) {
         failure = '$e';
         break;
       }
       usage = usage + round.usage;
-      lastText = _textOf(round.parts);
+      // 工具轮通常没有正文；别让空字符串把流式期间已经显示的文本清掉。
+      final roundText = _textOf(round.parts);
+      if (roundText.trim().isNotEmpty) lastText = roundText;
       final pending = round.pendingTools;
       if (pending.isEmpty) {
         msgs.add(ChatMessage(role: Role.assistant, parts: round.parts));
@@ -284,6 +320,8 @@ class SubAgentRunner {
           ),
         );
         ctx.onProgress?.call('${agent.name} · ${call.name}${_argHint(call)}');
+        // 每跑完一个工具都推一次，界面能立刻看到多了一条步骤。
+        publish('running', force: true);
       }
       msgs.add(ChatMessage(role: Role.assistant, parts: round.parts));
     }
@@ -294,6 +332,7 @@ class SubAgentRunner {
       // 而不是把它看不懂的工具原文直接倒过去。
       output = _fallbackDigest(steps);
     }
+    publish(failure.isEmpty ? (output.isEmpty ? 'failed' : 'done') : 'failed', force: true, overrideOutput: output);
     final result = SubAgentResult(
       agent: agent.name,
       task: text,
