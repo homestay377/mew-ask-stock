@@ -87,7 +87,7 @@ class MiniPhoneChannel {
 String renderScreenForModel(Map<String, dynamic> screen, {int maxElements = 80}) {
   // 两个来源都会进来：MethodChannel 的 Map 和测试里手写的字面量（可能是 Map<Object?, Object?>）。
   // 统一转成 Map<String, dynamic>，否则 screen['ok'] 取不到，会误报"读屏失败"。
-  final s = screen.map((k, v) => MapEntry('$k', v));
+  final s = <String, dynamic>{for (final e in screen.entries) '${e.key}': e.value};
   if (s['ok'] != true) {
     return '读屏失败：${s['error'] ?? 'unknown'}${s['message'] == null ? '' : '（${s['message']}）'}';
   }
