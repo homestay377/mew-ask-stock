@@ -49,6 +49,19 @@
             android:name=".ChatGenerationService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+        <!-- 手机操控：读屏 + 手势，仅供 App 内 AI 使用；用户在系统设置里手动开启 -->
+        <service
+            android:name=".miniphone.MiniPhoneAccessibility"
+            android:exported="true"
+            android:label="@string/mini_phone_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/mini_phone_accessibility" />
+        </service>
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

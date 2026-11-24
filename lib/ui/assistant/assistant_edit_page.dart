@@ -7,6 +7,7 @@ import '../../core/attachments.dart';
 import '../../core/i18n.dart';
 import '../../data/assistant.dart';
 import '../../state/settings_store.dart';
+import '../../tools/mini_phone_channel.dart';
 import '../chat/composer.dart';
 import '../chat/model_picker.dart';
 import '../widgets/common.dart';
@@ -475,6 +476,19 @@ class _AssistantEditPageState extends State<AssistantEditPage> with SingleTicker
                   }
                 }
                 _save(next);
+              },
+            ),
+            SwitchListTile(
+              secondary: const IconBadge(Icons.touch_app_rounded),
+              title: Text(t('手机操控', 'Phone control')),
+              subtitle: Text(t('读屏、点击、输入（需开启无障碍服务）', 'Read the screen, tap and type (needs accessibility)')),
+              value: _a.enablePhoneControl,
+              onChanged: (v) async {
+                _save(_a.copyWith(enablePhoneControl: v));
+                if (v) {
+                  final ch = MiniPhoneChannel();
+                  if (!await ch.connected()) await ch.openAccessibilitySettings();
+                }
               },
             ),
             SwitchListTile(
