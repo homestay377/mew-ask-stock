@@ -11,7 +11,11 @@ library;
 
 import 'dart:io';
 
+import 'dart:io';
+
+import '../core/paths.dart';
 import '../core/virtual_display_overlay_state.dart';
+import '../core/virtual_display_shot.dart';
 import 'tool.dart';
 import 'mini_phone_channel.dart';
 import 'virtual_display_channel.dart';
@@ -145,6 +149,23 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
   /// 3. 都不行才说读不到。
   ///
   /// 所以"没开无障碍"不等于用不了——这正是 Mika 的做法。
+  /// 多模态模型：读屏成功时把这一帧存下来，交给下一轮请求当图片附件。
+  /// 不支持视觉的模型不截图（[VirtualDisplayShot.wanted] 为 false），省一次 PNG 编码。
+  Future<String> withShot(String text) async {
+    if (!VirtualDisplayShot.wanted) return text;
+    try {
+      final png = await d.vd.screenshot();
+      if (png != null) {
+        final f = File('${AppPaths.cache.path}/vd_shot.png');
+        await f.writeAsBytes(png, flush: false);
+        VirtualDisplayShot.offer(f.path);
+      }
+    } catch (_) {
+      // 截图失败不影响文字结果
+    }
+    return text;
+  }
+
   Future<String> readScreen({
     int maxElements = kVirtualMaxElements,
     bool withImage = false,
@@ -159,7 +180,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     final snap = await d.phone.observe(displayId: id, resourceIds: false);
     final elements = (snap['elements'] as List?) ?? const [];
     if (snap['ok'] == true && elements.isNotEmpty) {
-      return renderScreenForModel(snap, maxElements: maxElements);
+      return withShot(renderScreenForModel(snap, maxElements: maxElements));
     }
 
     // 2. 本机 OCR。默认只认一次——每次动作都多花 600ms 重试，点起来就是"慢".
@@ -168,9 +189,9 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     if (lines.isEmpty && retryEmpty) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
       lines = await d.vd.ocr();
-      if (lines.isNotEmpty) return renderOcrForModel(lines, maxElements: maxElements);
+      if (lines.isNotEmpty) return withShot(renderOcrForModel(lines, maxElements: maxElements));
     }
-    if (lines.isNotEmpty) return renderOcrForModel(lines, maxElements: maxElements);
+    if (lines.isNotEmpty) return withShot(renderOcrForModel(lines, maxElements: maxElements));
 
     // 3. 都没有：说清可能的原因，别谎称"空屏"
     if (withImage) {

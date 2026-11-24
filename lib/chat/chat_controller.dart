@@ -14,6 +14,7 @@ import '../ai/provider.dart';
 import '../ai/provider_config.dart';
 import '../core/i18n.dart';
 import '../core/net.dart';
+import '../core/virtual_display_shot.dart';
 import '../core/retry.dart';
 import '../core/util.dart';
 import '../data/assistant.dart';
@@ -457,6 +458,11 @@ class ChatController extends ChangeNotifier {
 
     final acc = PartAccumulator();
     var totalUsage = const TokenUsage();
+    // 多模态模型才截虚拟屏：非视觉模型既不需要，也别白花一次 PNG 编码。
+    VirtualDisplayShot.wanted = model.vision;
+
+    /// 只进当次请求、不落会话的临时消息（虚拟屏截图）。
+    final visionNotes = <ChatMessage>[];
     try {
       if (autoCompression != null && !cancel.isCancelled) {
         try {
@@ -475,6 +481,7 @@ class ChatController extends ChangeNotifier {
           history: [
             ...history,
             msg.copyWith(parts: acc.parts),
+            ...visionNotes,
           ],
           customSystemPrompt: _conv.customSystemPrompt,
           extraModeIds: _conv.modeIds,
@@ -515,6 +522,13 @@ class ChatController extends ChangeNotifier {
           _conv = _conv.upsertMessage(nodeId, msg);
           _scheduleNotify();
         });
+        final shot = VirtualDisplayShot.take();
+        if (shot != null && !cancel.isCancelled) {
+          // 只留最新一张：多轮工具调用累计图片会把 token 顶爆
+          visionNotes
+            ..clear()
+            ..add(ChatMessage(role: Role.user, parts: [ImagePart(shot), TextPart('（上面这张是虚拟屏此刻的画面，供你判断界面用；不是用户发来的。）')]));
+        }
         if (cancel.isCancelled) break;
       }
     } on http.RequestAbortedException {
@@ -524,6 +538,7 @@ class ChatController extends ChangeNotifier {
         lastError = e is ApiException ? e.toString() : '$e';
       }
     } finally {
+      VirtualDisplayShot.reset();
       acc.closeAll();
       // A superseded stream (edit, regenerate, new turn) must not write back:
       // its node may already have been replaced by a newer generation.
