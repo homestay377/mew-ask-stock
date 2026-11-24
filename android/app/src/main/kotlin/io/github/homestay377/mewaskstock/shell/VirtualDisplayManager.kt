@@ -87,6 +87,9 @@ object VirtualDisplayManager {
 
     fun frame(): android.graphics.Bitmap? = host?.currentFrame
 
+    /** 当前画面指纹（见 [VirtualDisplayHost.fingerprint]）；没有画面时为空串。 */
+    fun fingerprint(): String = host?.fingerprint() ?: ""
+
     /**
      * 用本机 OCR 读虚拟屏上的文字，**不依赖无障碍**。
      *
