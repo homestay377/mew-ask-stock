@@ -49,7 +49,10 @@ class ShellDisplayService : IShellDisplay.Stub() {
         }
         for ((name, flags) in plans) {
             try {
-                val vd = dm.createVirtualDisplay(NAME, width, height, dpi, surface, flags)
+                // 关键：必须用带 packageName 的重载，并传 com.android.shell。
+                // 不带包名的重载会用 App 自己的包名，而这段代码以 shell（uid 2000）身份运行，
+                // 系统校验就抛 SecurityException: packageName must match the owner uid。
+                val vd = createVirtualDisplayWithOwner(dm, width, height, dpi, surface, flags)
                 if (vd == null) {
                     lastError = "$name: createVirtualDisplay 返回 null"
                     Log.w(TAG, "createDisplay returned null ($name, flags=0x${flags.toString(16)})")
@@ -68,6 +71,37 @@ class ShellDisplayService : IShellDisplay.Stub() {
             }
         }
         return -1
+    }
+
+    /**
+     * 调 `createVirtualDisplay(name, w, h, dpi, surface, flags, packageName)`。
+     *
+     * packageName 必须是**调用者 uid 对应的包**：我们跑在 shell（uid 2000）里，
+     * 所以要传 `com.android.shell`。传 App 自己的包名会被系统以
+     * `SecurityException: packageName must match the owner uid` 拒绝。
+     *
+     * 这个重载 API 33 才有；更早的系统没有 uid 校验，退回不带包名的那个。
+     */
+    @SuppressLint("PrivateApi")
+    private fun createVirtualDisplayWithOwner(
+        dm: DisplayManager,
+        width: Int,
+        height: Int,
+        dpi: Int,
+        surface: Surface,
+        flags: Int,
+    ): VirtualDisplay? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            return dm.createVirtualDisplay(NAME, width, height, dpi, surface, flags)
+        }
+        val m = DisplayManager::class.java.methods.firstOrNull {
+            it.name == "createVirtualDisplay" && it.parameterTypes.size == 7
+        } ?: run {
+            // 某些 ROM 改了签名；退回原重载（可能仍报包名错）
+            Log.w(TAG, "7-arg createVirtualDisplay not found, falling back")
+            return dm.createVirtualDisplay(NAME, width, height, dpi, surface, flags)
+        }
+        return m.invoke(dm, NAME, width, height, dpi, surface, flags, OWNER_PACKAGE) as? VirtualDisplay
     }
 
     /** 最近一次建屏失败的原因，App 侧会读出来给用户看。 */
@@ -264,6 +298,9 @@ class ShellDisplayService : IShellDisplay.Stub() {
         const val TAG = "ShellDisplay"
         const val NAME = "mew-ask"
         const val SHELL_PACKAGE = "com.android.shell"
+
+        /** 建屏时的 owner 包名：必须是我们自己 uid（2000）对应的包。 */
+        const val OWNER_PACKAGE = SHELL_PACKAGE
         const val USER_CURRENT = -2 // UserHandle.USER_CURRENT
         const val TAP_MS = 90L
         const val SWIPE_STEPS = 14
