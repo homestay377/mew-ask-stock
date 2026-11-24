@@ -9,8 +9,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.PixelFormat
-import android.hardware.display.DisplayManager
-import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
@@ -41,7 +39,6 @@ class VirtualDisplayHost(private val context: Context) {
     private var frame: Bitmap? = null
 
     private var reader: ImageReader? = null
-    private var skeleton: VirtualDisplay? = null
     private var thread: HandlerThread? = null
     private var handler: Handler? = null
     private var pending = false
@@ -56,7 +53,6 @@ class VirtualDisplayHost(private val context: Context) {
      */
     fun start(service: IShellDisplay): Boolean {
         if (running) return true
-        val dm = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
         val metrics = context.resources.displayMetrics
         val w = metrics.widthPixels.takeIf { it > 0 } ?: 1080
         val h = metrics.heightPixels.takeIf { it > 0 } ?: 2400
@@ -69,11 +65,8 @@ class VirtualDisplayHost(private val context: Context) {
         val r = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2)
         reader = r
 
-        // 让画面也能被本地 SurfaceFlinger 合成（有些系统要求 Surface 处于"已连接"状态才开始出帧）
-        skeleton = runCatching {
-            dm.createVirtualDisplay("mew-ask-skeleton", w, h, dpi, r.surface, 0)
-        }.getOrNull()
-
+        // 不建本地 skeleton 屏：Mika 的 AgentDisplay 只用 shell 那块屏。
+        // 两块 Display 抢同一个 Surface 会互相清帧，画面停在第一帧或全黑。
         r.setOnImageAvailableListener({ onFrame(it) }, hd)
 
         val id = runCatching { service.createDisplay(r.surface, w, h, dpi) }.getOrDefault(-1)
@@ -92,9 +85,7 @@ class VirtualDisplayHost(private val context: Context) {
         displayId = -1
         frame = null
         runCatching { if (id >= 0) service?.releaseDisplay(id) }
-        runCatching { skeleton?.release() }
         runCatching { reader?.close() }
-        skeleton = null
         reader = null
         thread?.quitSafely()
         thread = null

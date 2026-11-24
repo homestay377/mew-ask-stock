@@ -62,6 +62,7 @@ class ShellDisplayService : IShellDisplay.Stub() {
                 synchronized(lock) { displays[id] = vd }
                 setFullscreenWindowingMode(id)
                 setImePolicy(id)
+                keepAwake(id, flags)
                 Log.i(TAG, "createDisplay id=$id ${width}x$height via $name (flags=0x${flags.toString(16)})")
                 lastError = null
                 return id
@@ -153,8 +154,25 @@ class ShellDisplayService : IShellDisplay.Stub() {
     private var lastOwnerInfo: String? = null
 
     override fun releaseDisplay(displayId: Int) {
+        DisplayAwake.stop(displayId)
         val vd = synchronized(lock) { displays.remove(displayId) }
         runCatching { vd?.release() }.onFailure { Log.w(TAG, "releaseDisplay failed", it) }
+    }
+
+    /**
+     * 屏建好之后让它别睡（见 [DisplayAwake]）。
+     *
+     * 只有这一块屏真的自成一组（带了 OWN_DISPLAY_GROUP）时才替它报用户操作：
+     * 报到默认组会把用户的主屏也一直点着不灭。
+     */
+    private fun keepAwake(displayId: Int, flags: Int) {
+        val group = DisplayAwake.displayGroup(displayId)
+        if (!DisplayAwake.needed(flags, FLAG_OWN_DISPLAY_GROUP, group)) {
+            Log.i(TAG, "display $displayId shares the default display group; keep-awake skipped (group=$group, flags=0x${flags.toString(16)})")
+            return
+        }
+        DisplayAwake.start(displayId)
+        Log.i(TAG, "display $displayId keep-awake on (group=$group)")
     }
 
     override fun startApp(displayId: Int, packageName: String): Int {
