@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
-import 'mini_phone_channel.dart';
 
 /// 无障碍通道：读屏 / 点击 / 输入。
 ///
