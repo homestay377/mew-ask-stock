@@ -36,11 +36,8 @@ class VirtualDisplayChannel {
   ///
   /// 用户的动作：系统设置 → 开发者选项 → 无线调试 → 使用配对码配对设备，
   /// 抄下 6 位码（对话框别关）。端口从 mDNS 自动发现，也可以手填 [port]。
-  Future<Map<String, dynamic>> pairWireless(String code, {int? port}) => _call(
-    'pair_wireless',
-    args: {'code': code, if (port != null) 'port': port},
-    timeout: const Duration(seconds: 30),
-  );
+  Future<Map<String, dynamic>> pairWireless(String code, {int? port}) =>
+      _call('pair_wireless', args: {'code': code, 'port': ?port}, timeout: const Duration(seconds: 30));
 
   /// 配对之后拉起 shell 身份助手（B 路线第二步）。成功后再 ensureDisplay 就能建屏。
   Future<Map<String, dynamic>> startWireless() => _call('start_wireless', timeout: const Duration(seconds: 40));

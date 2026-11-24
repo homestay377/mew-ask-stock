@@ -85,7 +85,7 @@ class _VirtualDisplayPageState extends State<VirtualDisplayPage> {
           if (st != null && !st.usable) ...[
             SettingsGroup(
               title: t('路线 1：Shizuku', 'Route 1: Shizuku'),
-              footer: Text(t('装好 Shizuku 并启动服务后，在这里点一次授权即可。', 'Install and start Shizuku, then grant once here.')),
+              footer: t('装好 Shizuku 并启动服务后，在这里点一次授权即可。', 'Install and start Shizuku, then grant once here.'),
               children: [
                 ListTile(
                   leading: const IconBadge(Icons.extension_rounded),
@@ -117,11 +117,9 @@ class _VirtualDisplayPageState extends State<VirtualDisplayPage> {
             ),
             SettingsGroup(
               title: t('路线 2：无线调试', 'Route 2: Wireless debugging'),
-              footer: Text(
-                t(
-                  '系统设置 → 开发者选项 → 无线调试 → 使用配对码配对设备，抄下 6 位码（对话框别关），填在这里。',
-                  'Settings → Developer options → Wireless debugging → Pair device with pairing code; copy the 6-digit code.',
-                ),
+              footer: t(
+                '系统设置 → 开发者选项 → 无线调试 → 使用配对码配对设备，抄下 6 位码（对话框别关），填在这里。',
+                'Settings → Developer options → Wireless debugging → Pair device with pairing code; copy the 6-digit code.',
               ),
               children: [
                 ListTile(
@@ -202,7 +200,7 @@ class _VirtualDisplayPageState extends State<VirtualDisplayPage> {
     'need_permission' => t('需要授权', 'Permission needed'),
     'binding' => t('正在绑定…', 'Binding…'),
     'ready' => t('已连接', 'Connected'),
-    'failed' => '${st.shizukuDetail ?? '失败'}',
+    'failed' => st.shizukuDetail ?? '失败',
     _ => st.shizuku,
   };
 }
