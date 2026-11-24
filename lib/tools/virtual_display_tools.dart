@@ -268,7 +268,8 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     AppTool(
       name: 'vd_tap',
       displayName: '点虚拟屏',
-      description: '点虚拟屏上的元素（传 ref）或坐标。'
+      description:
+          '点虚拟屏上的元素（传 ref）或坐标。'
           '没有 ref（比如只有 OCR 结果）时传 x/y 即可，坐标来自 observe 输出。动作后自动再读一次屏。',
       parameters: objectSchema({
         'ref': strProp('元素编号，如 @e12'),
