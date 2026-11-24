@@ -38,6 +38,7 @@ object ShellServiceMain {
         @Suppress("DEPRECATION")
         if (Looper.myLooper() == null) Looper.prepareMainLooper()
 
+        // app_process 场景：自建 Context 并包成"自称 shell"
         val context = runCatching { ShellContext.create() }.getOrElse {
             Log.e(TAG, "cannot build shell context", it)
             exitProcess(3)

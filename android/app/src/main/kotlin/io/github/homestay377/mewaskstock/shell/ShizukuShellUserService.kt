@@ -22,9 +22,16 @@ class ShizukuShellUserService private constructor(dummy: Boolean) : IShellDispla
     @Keep
     constructor(context: Context?) : this(true) {
         ensureMainLooper()
-        // Shizuku 有 Context 就给，没有就以 shell 身份自建一份
-        val installed = context?.let { runCatching { ContextHolder.install(it); true }.getOrDefault(false) } ?: false
-        if (!installed) ShellContext.install(PACKAGE)
+        // Shizuku 给的 Context 自称是 android（uid 1000），必须包成"自称 shell"的才能建屏。
+        // 关键点：不是换一个 Context，而是让 packageName/opPackageName/attributionSource 都变成 shell。
+        val installed = runCatching {
+            val base = context ?: ShellContext.create()
+            ContextHolder.install(ShellContext.wrap(base))
+            true
+        }.getOrDefault(false)
+        if (!installed) {
+            runCatching { ContextHolder.install(ShellContext.create()) }
+        }
         Log.i(TAG, "Shizuku user service created (uid=${android.os.Process.myUid()})")
     }
 
