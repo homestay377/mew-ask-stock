@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import 'package:mewhub/core/i18n.dart';
+import 'package:mewhub/core/virtual_display_shot.dart';
 import 'package:mewhub/tools/virtual_display_channel.dart';
 
 /// 虚拟屏的实时画面。
@@ -76,6 +77,9 @@ class _VirtualDisplayPreviewState extends State<VirtualDisplayPreview> {
         if (png != null) {
           _png = png;
           _error = null;
+          // 记下真实宽高比：悬浮窗要按这个比例显示，否则 cover 会把整屏裁掉上下
+          final size = VirtualDisplayShot.sizeOf(png);
+          if (size != null) VirtualDisplayShot.aspect.value = size.height / size.width;
         } else if (_png == null) {
           _error = t('还没有画面：先让 AI 打开一个 App', 'No frame yet: open an app first');
         }
@@ -113,6 +117,10 @@ class _VirtualDisplayPreviewState extends State<VirtualDisplayPreview> {
     final w = widget.width;
     final h = widget.height;
     if (w != null && h != null) return SizedBox(width: w, height: h, child: body);
+    if (w != null) {
+      // 只给宽度：高度按真实画面比例走（悬浮窗用这个，整屏都看得见，不再裁上下）
+      return SizedBox(width: w, child: body);
+    }
     final byAspect = Center(
       child: AspectRatio(aspectRatio: 9 / 19.5, child: body),
     );
