@@ -58,7 +58,7 @@ void main() {
         'ok': true,
         'size': [1080, 2400],
         'elements': elements,
-      });
+      }, maxElements: 3);
       expect(text, contains('共 120 个元素'));
       expect(text, contains('只列前 3 个'));
       expect(text, contains('@e2'));
