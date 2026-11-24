@@ -17,7 +17,7 @@ void check(String what, bool ok, [String? detail]) {
 }
 
 /// 与 `lib/tools/mini_phone_channel.dart` 里的实现逐行一致（那边依赖 Flutter，无法在本机 import）。
-String render(Map screen, {int maxElements = 80}) {
+String render(Map<Object?, Object?> screen, {int maxElements = 80}) {
   final s = <String, dynamic>{};
   screen.forEach((k, v) => s['$k'] = v);
   if (s['ok'] != true) {

@@ -85,7 +85,7 @@ class MiniPhoneChannel {
 /// 只保留有名字或可交互的元素（原生已经过滤），再按名字去重相邻重复行（列表滚动时的重复条目）。
 ///
 /// 纯函数、不依赖 Flutter：既能在 App 里跑，也能单独用 dart 跑（`tool/mini_phone_render_check.dart`）。
-String renderScreenForModel(Map screen, {int maxElements = 80}) {
+String renderScreenForModel(Map<Object?, Object?> screen, {int maxElements = 80}) {
   // 两个来源都会进来：MethodChannel 的 Map 和测试里手写的字面量（可能是 Map<Object?, Object?>）。
   // 统一转成 Map<String, dynamic>，否则 screen['ok'] 取不到，会误判成"读屏失败"。
   final s = <String, dynamic>{};
