@@ -49,6 +49,8 @@ class VirtualDisplayBridge(
             val pairing = PairingCoordinator(context, store, discovery)
             // 通知栏输入框的落点接上
             PairingCodeReceiver.sink = PairingCodeSink { code, port -> pairing.pair(code, port) }
+            // 开始监听 Shizuku 状态（服务起来/断掉都会刷新）
+            shizuku.watch { }
             return VirtualDisplayBridge(context, shizuku, wireless, router, pairing)
         }
     }

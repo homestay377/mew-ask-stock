@@ -42,14 +42,13 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler(MiniPhoneBridge(applicationContext))
 
         // 虚拟屏（Shizuku 或无线调试助手，App 在后台屏上跑）
-        val (bridge, sh, _) = VirtualDisplayBridge.create(applicationContext)
-        shizuku = sh
+        val bridge = VirtualDisplayBridge.create(applicationContext)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VirtualDisplayBridge.CHANNEL)
             .setMethodCallHandler(bridge)
     }
 
     override fun onDestroy() {
-        shizuku?.unwatch()
+        // Shizuku 监听在 bridge 内部管理；进程结束一并回收
         super.onDestroy()
     }
 }
