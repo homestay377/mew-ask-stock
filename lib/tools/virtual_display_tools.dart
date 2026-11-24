@@ -230,7 +230,8 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
       return '$what 已下发（${sw.elapsedMilliseconds} ms，$changeNote）。'
           '无障碍没连，这次没读文字细节；要继续下一步就直接点/输入，需要看字再 vd_observe。';
     }
-    final text = await readScreen();
+    // 动作后的读屏只取前 40 条：连续操作时上下文涨得最快的就是这些整屏 dump
+    final text = await readScreen(maxElements: 40);
     sw.stop();
     final ms = sw.elapsedMilliseconds;
     final cost = ms < 1000 ? '$ms ms' : '${(ms / 1000).toStringAsFixed(1)} s';
