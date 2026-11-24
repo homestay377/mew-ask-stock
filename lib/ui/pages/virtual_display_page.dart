@@ -24,6 +24,10 @@ class _VirtualDisplayPageState extends State<VirtualDisplayPage> {
   final _codeCtl = TextEditingController();
   bool _pairing = false;
 
+  /// 屏就绪但无障碍还没连时，进来自动试一次（用 shell 身份写 secure 设置）。
+  /// 只试一次，失败不再反复弹。
+  bool _a11yTried = false;
+
   @override
   void initState() {
     super.initState();
@@ -38,7 +42,12 @@ class _VirtualDisplayPageState extends State<VirtualDisplayPage> {
   }
 
   Future<void> _refresh() async {
-    final st = await _ch.status();
+    var st = await _ch.status();
+    if (st.usable && !st.accessibility && !_a11yTried) {
+      _a11yTried = true;
+      await _ch.enableAccessibility();
+      st = await _ch.status();
+    }
     if (!mounted) return;
     setState(() => _status = st);
   }
@@ -242,6 +251,21 @@ class _VirtualDisplayPageState extends State<VirtualDisplayPage> {
                           : t('无障碍未连接：AI 会自己开；开不了就读屏走本机 OCR', 'Accessibility off: the AI turns it on itself'),
                     ),
                   ),
+                  if (!st.accessibility)
+                    ListTile(
+                      leading: const IconBadge(Icons.accessibility_new_rounded),
+                      title: Text(t('开启无障碍（AI 自己写，不用去系统设置）', 'Enable accessibility')),
+                      subtitle: Text(t('连上后能读精确控件，也能在虚拟屏打中文', 'Reads exact controls and types Chinese')),
+                      onTap: _busy
+                          ? null
+                          : () => _run(() async {
+                              final r = await _ch.enableAccessibility();
+                              if (r['ok'] != true) {
+                                setState(() => _message = '${r['detail'] ?? r['error'] ?? '没生效'}');
+                              }
+                              return r;
+                            }, t('无障碍已开启', 'Accessibility enabled')),
+                    ),
                   ListTile(
                     leading: const IconBadge(Icons.restart_alt_rounded),
                     title: Text(t('重建虚拟屏', 'Recreate display')),

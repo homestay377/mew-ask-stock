@@ -431,7 +431,13 @@ class AppSettings {
   );
 
   factory AppSettings.fromJson(Map<String, dynamic> j) {
-    final assistants = mapList(j['assistants'], Assistant.fromJson);
+    var assistants = mapList(j['assistants'], Assistant.fromJson);
+    // 一次性迁移：虚拟屏工具以前默认关，等于是要用户自己去开关一次才有这些能力。
+    // 现在默认开——用户要的是"给过权限就该能自己用"。老配置里显式的 false 也打开一次，
+    // 写进 vdAutoOn 之后不再动；用户以后在助手设置里关掉仍然有效。
+    if (j['vdAutoOn'] != true) {
+      assistants = [for (final a in assistants) a.enableVirtualDisplay ? a : a.copyWith(enableVirtualDisplay: true)];
+    }
     final loadedAssistants = assistants.isEmpty ? defaultAssistants() : assistants;
     var list = [
       for (final assistant in loadedAssistants)
@@ -511,6 +517,8 @@ class AppSettings {
     'accentIndex': accentIndex,
     'providers': providers.map((e) => e.toJson(withSecrets: withSecrets)).toList(),
     'assistants': assistants.map((e) => e.toJson()).toList(),
+    // 标记「虚拟屏工具已按新默认打开过」，迁移只做一次
+    'vdAutoOn': true,
     'currentAssistantId': currentAssistantId,
     'chatModelId': chatModelId,
     'titleModelId': titleModelId,
