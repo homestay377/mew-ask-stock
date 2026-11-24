@@ -372,13 +372,13 @@ bool _looksLikeMarket(String label) {
 }
 
 /// 把 OCR 结果渲染成给模型看的文本：每行带坐标，方便它直接点。
-String renderOcrForModel(List<Map<String, dynamic>> lines, {int maxElements = 80}) {
-  if (lines.isEmpty()) return '（没有认出文字）';
-  final buf = StringBuffer('屏幕文字（本机 OCR，共 ${lines.length} 行）');
-  if (lines.length > maxElements) buf.write('，只列前 $maxElements 行');
+String renderOcrForModel(List<Map<String, dynamic>> ocrLines, {int maxElements = 80}) {
+  if (ocrLines.isEmpty) return '（没有认出文字）';
+  final buf = StringBuffer('屏幕文字（本机 OCR，共 ${ocrLines.length} 行）');
+  if (ocrLines.length > maxElements) buf.write('，只列前 $maxElements 行');
   buf.writeln();
   var n = 0;
-  for (final l in lines) {
+  for (final l in ocrLines) {
     if (n >= maxElements) break;
     final text = '${l['text'] ?? ''}'.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (text.isEmpty) continue;
