@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
-
 /// 无障碍通道：读屏 / 点击 / 输入。
 ///
 /// 两种模式共用这一套方法，只差 `displayId`：
