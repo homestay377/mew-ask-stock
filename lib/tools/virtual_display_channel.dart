@@ -74,6 +74,17 @@ class VirtualDisplayChannel {
   /// back / enter / home / del
   Future<Map<String, dynamic>> pressKey(String key) => _call('press_key', args: {'key': key});
 
+  /// 用**本机 OCR** 读虚拟屏上的文字，返回带坐标的行。
+  ///
+  /// 这条路**不需要无障碍**：画面经 ImageReader 进来，ML Kit 在本机识别，
+  /// 每行带 `text` 和 `center`（虚拟屏像素），可直接用于 [tap]。
+  Future<List<Map<String, dynamic>>> ocr() async {
+    final r = await _call('ocr', timeout: const Duration(seconds: 25));
+    if (r['ok'] != true) return const [];
+    final lines = (r['lines'] as List?) ?? const [];
+    return lines.map((e) => (e as Map).map((k, v) => MapEntry('$k', v))).toList();
+  }
+
   /// 虚拟屏当前帧（base64 PNG）。App 还没启动时可能没有帧。
   Future<Uint8List?> screenshot() async {
     final r = await _call('screenshot');

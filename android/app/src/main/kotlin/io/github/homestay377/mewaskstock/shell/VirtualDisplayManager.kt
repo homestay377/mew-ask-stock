@@ -87,6 +87,58 @@ object VirtualDisplayManager {
 
     fun frame(): android.graphics.Bitmap? = host?.currentFrame
 
+    /**
+     * 用本机 OCR 读虚拟屏上的文字，**不依赖无障碍**。
+     *
+     * 坐标换算：OCR 跑在缩放后的预览图上，返回的矩形要按 预览/整帧 的比例放大回虚拟屏像素，
+     * 再取中心点给 `injectTap` 用。
+     */
+    suspend fun ocrLines(): List<OcrLine> {
+        val h = host ?: return emptyList()
+        val lines = runCatching { h.ocrTextLines() }.getOrElse {
+            Log.w(TAG, "ocr failed", it)
+            return emptyList()
+        }
+        if (lines.isEmpty()) return emptyList()
+        val (fw, fh) = h.frameSize() ?: return emptyList()
+        val shortSide = h.ocrInputShortSide()
+        val scale = if (fw <= 0 || fh <= 0) 1f else {
+            // 预览把短边压到 shortSide，长边等比例；用整帧短边反推缩放比
+            val frameShort = minOf(fw, fh)
+            if (frameShort <= shortSide) 1f else frameShort.toFloat() / shortSide
+        }
+        return lines.map { l ->
+            val cx = ((l.rect.left + l.rect.right) / 2f * scale).toInt()
+            val cy = ((l.rect.top + l.rect.bottom) / 2f * scale).toInt()
+            OcrLine(
+                text = l.text,
+                cx = cx,
+                cy = cy,
+                left = (l.rect.left * scale).toInt(),
+                top = (l.rect.top * scale).toInt(),
+                right = (l.rect.right * scale).toInt(),
+                bottom = (l.rect.bottom * scale).toInt(),
+            )
+        }
+    }
+
+    /** 一行 OCR 结果，坐标已换算成虚拟屏像素。 */
+    data class OcrLine(
+        val text: String,
+        val cx: Int,
+        val cy: Int,
+        val left: Int,
+        val top: Int,
+        val right: Int,
+        val bottom: Int,
+    ) {
+        fun toMap(): Map<String, Any?> = mapOf(
+            "text" to text,
+            "center" to listOf(cx, cy),
+            "bounds" to listOf(left, top, right, bottom),
+        )
+    }
+
     /** 当前帧的 PNG（给视觉模型/用户看）。 */
     fun screenshotPng(maxShortSide: Int = 720): ByteArray? {
         val bmp = host?.preview(maxShortSide) ?: return null

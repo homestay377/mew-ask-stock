@@ -15,6 +15,7 @@ import io.github.homestay377.mewaskstock.pairing.PairingCodeSink
 import io.github.homestay377.mewaskstock.pairing.PairingCoordinator
 import io.github.homestay377.mewaskstock.pairing.PairingNotifier
 import java.util.concurrent.Executors
+import kotlinx.coroutines.runBlocking
 
 /**
  * 虚拟屏 ↔ Flutter 的桥。
@@ -77,7 +78,7 @@ class VirtualDisplayBridge(
                         "routerNote" to r.note,
                         "shizukuText" to s.describe(),
                         "display" to vd.toMap(),
-                        "accessibility" to MiniPhoneA11yState.connected,
+                        "accessibility" to (io.github.homestay377.mewaskstock.miniphone.MiniPhoneAccessibility.instance != null),
                     ),
                 )
             }
@@ -251,6 +252,24 @@ class VirtualDisplayBridge(
                         }
                         main.post { result.success(mapOf("ok" to svc.injectKey(id, code))) }
                     }
+                    // 读虚拟屏上的文字（本机 OCR，不需要无障碍）。返回带坐标的行。
+                    "ocr" -> worker.execute {
+                        val lines = runCatching {
+                            runBlocking { VirtualDisplayManager.ocrLines() }
+                        }.getOrElse {
+                            Log.w("VDBridge", "ocr failed", it)
+                            emptyList()
+                        }
+                        main.post {
+                            result.success(
+                                mapOf(
+                                    "ok" to true,
+                                    "count" to lines.size,
+                                    "lines" to lines.map { it.toMap() },
+                                ),
+                            )
+                        }
+                    }
                     "screenshot" -> worker.execute {
                         val png = VirtualDisplayManager.screenshotPng()
                         main.post {
@@ -275,10 +294,4 @@ class VirtualDisplayBridge(
             }
         }
     }
-}
-
-/** 无障碍服务是否连着（虚拟屏读屏要靠它），避免 shell 包反向依赖 miniphone 包。 */
-object MiniPhoneA11yState {
-    @Volatile
-    var connected: Boolean = false
 }

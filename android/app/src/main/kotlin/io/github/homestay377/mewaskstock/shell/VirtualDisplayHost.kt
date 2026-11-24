@@ -9,7 +9,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.PixelFormat
-import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
@@ -18,6 +17,7 @@ import android.os.HandlerThread
 import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
+import io.github.homestay377.mewaskstock.ocr.ScreenOcr
 import kotlin.math.max
 import kotlin.math.min
 
@@ -112,13 +112,24 @@ class VirtualDisplayHost(private val context: Context) {
         return Bitmap.createScaledBitmap(src, w, h, true)
     }
 
-    /** 没有无障碍树可读时（部分 App 不暴露），用本机 OCR 兜底读文字。返回每行文字的矩形与内容。 */
-    fun ocrTextLines(maxLines: Int = 120): List<Triple<String, Rect, Array<Int>>> {
-        val bmp = preview(1080) ?: return emptyList()
-        // 占位：真正的 OCR 用 ML Kit 或系统 TextClassifier；P0 先返回空，
-        // 让上层继续走无障碍树（树读不到时再考虑接 OCR）。
-        return emptyList()
+    /**
+     * 读虚拟屏上的文字：本机 OCR，**不需要无障碍**。
+     *
+     * 返回的行带像素矩形；调用方要把矩形换算成「虚拟屏坐标」（用 [frameSize] 和预览缩放比）。
+     */
+    suspend fun ocrTextLines(): List<ScreenOcr.Line> {
+        val bmp = preview(OCR_MAX_SHORT_SIDE) ?: return emptyList()
+        return ScreenOcr.read(bmp)
     }
+
+    /** 当前帧的原始尺寸；OCR 用的是缩放后的图，换算坐标要用它。 */
+    fun frameSize(): Pair<Int, Int>? {
+        val f = frame ?: return null
+        return f.width to f.height
+    }
+
+    /** OCR 输入图的短边上限，判坐标换算用。 */
+    fun ocrInputShortSide(): Int = OCR_MAX_SHORT_SIDE
 
     private fun onFrame(r: ImageReader) {
         if (displayId < 0) return
@@ -156,5 +167,8 @@ class VirtualDisplayHost(private val context: Context) {
 
     private companion object {
         const val TAG = "VirtualDisplayHost"
+
+        /** OCR 输入短边：1080 足够认清行情文字，再大会明显变慢。 */
+        const val OCR_MAX_SHORT_SIDE = 1080
     }
 }

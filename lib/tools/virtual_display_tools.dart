@@ -41,21 +41,37 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
         '（需要：Shizuku 服务运行中 + 给问股授权；或在设置里完成无线调试配对）';
   }
 
-  /// 读虚拟屏：先试无障碍树（有文字和 ref），拿不到元素时退回截图。
+  /// 读虚拟屏。
+  ///
+  /// 顺序是**有意**的：
+  /// 1. **无障碍树**（开了才有效）：有精确控件、ref、可点状态，最适合点按钮；
+  /// 2. **本机 OCR**（不需要任何开关）：拿"文字 + 坐标"，行情数字这种纯文本界面够用；
+  /// 3. 都不行才说读不到。
+  ///
+  /// 所以"没开无障碍"不等于用不了——这正是 Mika 的做法。
   Future<String> readScreen({int maxElements = kVirtualMaxElements, bool withImage = false}) async {
     final st = await d.vd.status();
     if (!st.usable) return st.describe();
+
+    // 1. 无障碍树
     final snap = await d.phone.observe(displayId: st.displayId, resourceIds: false);
     final elements = (snap['elements'] as List?) ?? const [];
     if (snap['ok'] == true && elements.isNotEmpty) {
       return renderScreenForModel(snap, maxElements: maxElements);
     }
-    // 树是空的：App 可能还没画完，或者它用了不暴露无障碍的自绘界面
+
+    // 2. 本机 OCR
+    final lines = await d.vd.ocr();
+    if (lines.isNotEmpty) {
+      return renderOcrForModel(lines, maxElements: maxElements);
+    }
+
+    // 3. 都没有：说清可能的原因，别谎称"空屏"
     if (withImage) {
       final png = await d.vd.screenshot();
       if (png != null) {
-        return '虚拟屏上没有可读的文字节点（App 可能还没启动完，或界面是自绘的）。'
-            '已截一张图，尺寸 ${png.length} 字节；可以再等一会重试 mini_vd_observe。';
+        return '虚拟屏上没有可读文字（App 可能还没画完，或页面本身没字）。'
+            '已截一张图（${png.length} 字节）。可以等 1-2 秒再 mini_vd_observe。';
       }
     }
     return '虚拟屏上现在没有可读内容（display=${st.displayId}）。'
@@ -252,7 +268,8 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     AppTool(
       name: 'vd_tap',
       displayName: '点虚拟屏',
-      description: '点虚拟屏上的元素（传 ref）或坐标。动作后自动再读一次屏。',
+      description: '点虚拟屏上的元素（传 ref）或坐标。'
+          '没有 ref（比如只有 OCR 结果）时传 x/y 即可，坐标来自 observe 输出。动作后自动再读一次屏。',
       parameters: objectSchema({
         'ref': strProp('元素编号，如 @e12'),
         'x': intProp('X 坐标（虚拟屏像素）'),
@@ -345,6 +362,24 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
       },
     ),
   ];
+}
+
+/// 把 OCR 结果渲染成给模型看的文本：每行带坐标，方便它直接点。
+String renderOcrForModel(List<Map<String, dynamic>> lines, {int maxElements = 80}) {
+  if (lines.isEmpty()) return '（没有认出文字）';
+  final buf = StringBuffer('屏幕文字（本机 OCR，共 ${lines.length} 行）');
+  if (lines.length > maxElements) buf.write('，只列前 $maxElements 行');
+  buf.writeln();
+  var n = 0;
+  for (final l in lines) {
+    if (n >= maxElements) break;
+    final text = '${l['text'] ?? ''}'.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (text.isEmpty) continue;
+    final c = (l['center'] as List?) ?? const [0, 0];
+    buf.writeln('「$text」@${c[0]},${c[1]}');
+    n++;
+  }
+  return buf.toString().trimRight();
 }
 
 /// 粗略判断是不是行情类 App（只用于默认过滤，不用于断定身份）。

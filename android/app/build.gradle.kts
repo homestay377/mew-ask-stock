@@ -92,6 +92,11 @@ dependencies {
     // 用于创建虚拟屏（普通 App 没有这个权限）。见 docs/virtual-display.md
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+
+    // 虚拟屏读屏：画面进来后在本机 OCR 出「文字 + 坐标」。
+    // 用 bundled 版（模型打进 APK），不走 Play 服务按需下载——国内设备下不下来就完全用不了。
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 }
 
 flutter {
