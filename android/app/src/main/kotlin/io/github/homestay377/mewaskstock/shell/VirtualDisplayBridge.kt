@@ -78,6 +78,7 @@ class VirtualDisplayBridge(
                         "routerNote" to r.note,
                         "shizukuText" to s.describe(),
                         "display" to vd.toMap(),
+                        "displaySize" to VirtualDisplayManager.size(),
                         "accessibility" to (io.github.homestay377.mewaskstock.miniphone.MiniPhoneAccessibility.instance != null),
                     ),
                 )
