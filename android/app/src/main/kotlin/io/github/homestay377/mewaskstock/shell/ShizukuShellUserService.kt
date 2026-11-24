@@ -51,6 +51,8 @@ class ShizukuShellUserService private constructor(dummy: Boolean) : IShellDispla
 
     override fun injectKey(displayId: Int, keyCode: Int): Boolean = delegate.injectKey(displayId, keyCode)
 
+    override fun injectAsciiText(displayId: Int, text: String): Int = delegate.injectAsciiText(displayId, text)
+
     override fun identity(): IntArray = delegate.identity()
 
     override fun lastError(): String? = delegate.lastError()
