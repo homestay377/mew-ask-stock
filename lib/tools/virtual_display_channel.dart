@@ -39,16 +39,16 @@ class VirtualDisplayChannel {
 
   /// 在虚拟屏上打开一个包。失败原因见 [openError]。
   Future<Map<String, dynamic>> startApp(String packageName) =>
-      _call('start_app', {'package': packageName}, timeout: const Duration(seconds: 30));
+      _call('start_app', args: {'package': packageName}, timeout: const Duration(seconds: 30));
 
   /// 在虚拟屏上点一下（坐标是那块屏自己的像素）。
-  Future<Map<String, dynamic>> tap(int x, int y) => _call('tap', {'x': x, 'y': y});
+  Future<Map<String, dynamic>> tap(int x, int y) => _call('tap', args: {'x': x, 'y': y});
 
   Future<Map<String, dynamic>> swipe(int x1, int y1, int x2, int y2, {int durationMs = 320}) =>
-      _call('swipe', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2, 'durationMs': durationMs});
+      _call('swipe', args: {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2, 'durationMs': durationMs});
 
   /// back / enter / home / del
-  Future<Map<String, dynamic>> pressKey(String key) => _call('press_key', {'key': key});
+  Future<Map<String, dynamic>> pressKey(String key) => _call('press_key', args: {'key': key});
 
   /// 虚拟屏当前帧（base64 PNG）。App 还没启动时可能没有帧。
   Future<Uint8List?> screenshot() async {
@@ -62,14 +62,11 @@ class VirtualDisplayChannel {
   Future<Map<String, dynamic>> topTask() => _call('top_task');
 
   Future<Map<String, dynamic>> _call(
-    String method, [
+    String method, {
     Map<String, dynamic>? args,
     Duration timeout = const Duration(seconds: 12),
-  ]) async {
+  }) async {
     if (!Platform.isAndroid) return {'ok': false, 'error': 'unsupported_platform'};
-    if (args == null && method == 'status') {
-      // status 不需要超时保护，但要能容错
-    }
     try {
       final r = await _channel.invokeMethod<dynamic>(method, args).timeout(timeout);
       if (r is Map) return r.map((k, v) => MapEntry('$k', v));
