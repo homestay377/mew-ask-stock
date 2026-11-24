@@ -113,6 +113,33 @@ class VirtualDisplayHost(private val context: Context) {
         return ScreenOcr.read(bmp)
     }
 
+    /**
+     * 当前画面的指纹：`hash:宽:高`，没有画面时返回空串。
+     *
+     * 稀疏采样若干像素算 FNV-1a，几毫秒就回来。用途很窄但关键：
+     * 动作之后判断"这一下点下去界面到底变没变"——比跑一遍 OCR（几百毫秒）便宜两个数量级，
+     * 又比什么都不给模型要好（否则它点一下就以为完事了）。
+     */
+    fun fingerprint(): String {
+        val bmp = frame ?: return ""
+        val w = bmp.width
+        val h = bmp.height
+        if (w <= 0 || h <= 0) return ""
+        var hash = -0x340d631b7bdddcdbL // FNV-1a offset
+        val stepX = (w / 64).coerceAtLeast(1)
+        val stepY = (h / 64).coerceAtLeast(1)
+        var y = 0
+        while (y < h) {
+            var x = 0
+            while (x < w) {
+                hash = (hash xor bmp.getPixel(x, y).toLong()) * 0x100000001b3L
+                x += stepX
+            }
+            y += stepY
+        }
+        return "${hash.toULong().toString(16)}:$w:$h"
+    }
+
     /** 当前帧的原始尺寸；OCR 用的是缩放后的图，换算坐标要用它。 */
     fun frameSize(): Pair<Int, Int>? {
         val f = frame ?: return null
