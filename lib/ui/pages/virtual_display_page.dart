@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:mewhub/core/i18n.dart';
 import 'package:mewhub/tools/virtual_display_channel.dart';
 import 'package:mewhub/ui/widgets/common.dart';
+import 'package:mewhub/ui/widgets/virtual_display_preview.dart';
 
 /// 虚拟屏（手机操控）设置页。
 ///
@@ -242,6 +243,10 @@ class _VirtualDisplayPageState extends State<VirtualDisplayPage> {
               SettingsGroup(
                 title: t('已就绪', 'Ready'),
                 children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                    child: VirtualDisplayPreview(channel: _ch, height: 320),
+                  ),
                   ListTile(
                     leading: const IconBadge(Icons.memory_rounded),
                     title: Text(t('虚拟屏 display=${st!.displayId}', 'Display id ${st.displayId}')),

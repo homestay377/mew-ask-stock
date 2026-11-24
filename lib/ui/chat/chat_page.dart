@@ -22,6 +22,7 @@ import '../stock/stock_chart_panel.dart';
 import '../export.dart';
 import '../widgets/common.dart';
 import '../widgets/motion.dart';
+import '../widgets/virtual_display_preview.dart';
 import 'chat_drawer.dart';
 import 'chat_navigation.dart';
 import 'chat_quick_sheets.dart';
@@ -756,6 +757,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               value: 'export_md',
               child: _MenuRow(Icons.description_outlined, t('导出 Markdown', 'Export Markdown')),
             ),
+            PopupMenuItem(value: 'vd', child: _MenuRow(Icons.smartphone_outlined, t('看虚拟屏', 'Virtual display'))),
             PopupMenuItem(value: 'usage', child: _MenuRow(Icons.data_usage_rounded, t('用量统计', 'Token usage'))),
             PopupMenuItem(
               value: 'delete',
@@ -783,6 +785,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         if (p != null) await c.setCustomSystemPrompt(p);
       case 'export_md':
         await shareText(ConversationExport.markdown(conv), '${ConversationExport.fileName(conv)}.md');
+      case 'vd':
+        if (!mounted) return;
+        await showVirtualDisplaySheet(context);
       case 'usage':
         if (!mounted) return;
         await showChatUsageSheet(context, conv, contextLength: c.resolvedModel?.model.contextLength);
