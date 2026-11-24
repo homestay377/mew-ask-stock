@@ -90,6 +90,9 @@ object VirtualDisplayManager {
     /** 当前画面指纹（见 [VirtualDisplayHost.fingerprint]）；没有画面时为空串。 */
     fun fingerprint(): String = host?.fingerprint() ?: ""
 
+    /** 虚拟屏的像素尺寸 `[宽, 高]`；没有画面/没建屏时为 null。 */
+    fun size(): List<Int>? = host?.frameSize()?.let { listOf(it.first, it.second) }
+
     /**
      * 用本机 OCR 读虚拟屏上的文字，**不依赖无障碍**。
      *
