@@ -41,10 +41,11 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MiniPhoneBridge.CHANNEL)
             .setMethodCallHandler(MiniPhoneBridge(applicationContext))
 
-        // 虚拟屏（Shizuku / 无线调试拿到的 shell 身份，App 在后台屏上跑）
-        val sh = shizuku ?: ShizukuChannel(applicationContext).also { shizuku = it }
+        // 虚拟屏（Shizuku 或无线调试助手，App 在后台屏上跑）
+        val (bridge, sh, _) = VirtualDisplayBridge.create(applicationContext)
+        shizuku = sh
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VirtualDisplayBridge.CHANNEL)
-            .setMethodCallHandler(VirtualDisplayBridge(applicationContext, sh))
+            .setMethodCallHandler(bridge)
     }
 
     override fun onDestroy() {

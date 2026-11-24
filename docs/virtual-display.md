@@ -96,3 +96,47 @@ Shizuku 状态机（`ShizukuChannel`）：`not_installed / not_running / need_pe
 4. 坐标全偏：检查 `setWindowingMode` 是否成功（少数系统会拒绝，退 `wm` 命令也在日志里）。
 
 日志标签：`ShellDisplay`（shell 侧）、`ShizukuChannel`、`VirtualDisplayHost`、`VirtualDisplayMgr`。
+
+## 9. B 路线：无线调试（已实现）
+
+Shizuku 不是唯一通路。系统「开发者选项 → 无线调试」开着时，adbd 会在本机公布一个 TLS 端口；
+**配对一次之后，我们就能在 adbd 上开 `exec:` 流，以 uid 2000 跑命令**。
+
+流程：
+
+```
+用户：设置 → 开发者选项 → 无线调试 → 使用配对码配对设备（对话框别关）
+     ↓ 抄 6 位码
+App ：mDNS 找 _adb-tls-pairing._tcp 端口
+     ↓ TLS 1.3（双方自签证书，互不校验证书链）
+     ↓ 口令 = 配对码 + TLS 导出密钥("adb-label\0")
+     ↓ SPAKE2 交换 → AES-GCM 互换 PeerInfo（我们发 adb 公钥）
+配对成功（之后设备就认这把证书了）
+     ↓ mDNS 找 _adb-tls-connect._tcp 端口
+     ↓ 开 exec: 流 → CLASSPATH=<base.apk> app_process /system/bin ShellServiceMain <pkg>
+助手进程起来，回环 socket 交回 IShellDisplay binder
+```
+
+### 为什么这么绕
+
+- **不能直接 `am start-service`**：那会以 App 自己的 uid 运行，建不出虚拟屏。
+- **不能把 binder 写进文件**：只能走回环 socket + 一次性口令（[ShellHelperHandoff]）。
+- **端口每次都会变**：只能问 mDNS，写死没用。
+
+### 三个必须逐字节对齐的实现细节
+
+1. **SPAKE2 的口令标量**：`SHA-512(口令) mod L`，再按低三位依次加 L、2L、4L，使它成为 8 的倍数。
+   这是设备端的历史行为，少一步就协商失败。
+2. **AES-GCM 的 nonce**：12 字节，前 8 字节是**各自方向的序号**（小端，从 0 起每条加一），其余为零。
+3. **PeerInfo 包**：6 字节头（版本 1 / 类型 / 大端长度）+ 8192 字节负载，第一字节是密钥类型（0=RSA）。
+
+### 与 Shizuku 的关系
+
+`ShellRouter` 按这个顺序选：**Shizuku 就绪 → 用 Shizuku；否则已配对无线调试 → 拉助手**。
+两条路产出同一个 `IShellDisplay`，上层完全无感。任意一条挂了可以退到另一条。
+
+### 已知限制
+
+- 无线调试**重启手机后要重新开**（系统行为），但配对关系保留，重开之后点一次「启动助手」即可。
+- 同一台机器上，Shizuku 和无线调试可以同时可用，路由只会选一个，不会两边都建屏。
+- 「解除配对」会删掉本机私钥，下次需要重新抄配对码。

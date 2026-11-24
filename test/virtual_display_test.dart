@@ -39,6 +39,42 @@ void main() {
     test('不支持的平台说不支持，不说"状态未知"', () {
       expect(VirtualDisplayStatus.unsupported().describe(), contains('不支持'));
     });
+
+    test('无线调试路线就绪时也能用', () {
+      final s = VirtualDisplayStatus.fromMap({
+        'shizuku': 'not_installed',
+        'shizukuReady': false,
+        'wireless': 'ready',
+        'wirelessReady': true,
+        'source': 'wireless',
+        'display': {'ok': true, 'phase': 'ready', 'displayId': 3},
+      });
+      expect(s.usable, isTrue);
+      expect(s.source, 'wireless');
+      expect(s.describe(), contains('display=3'));
+    });
+
+    test('两条路线都没起来时，服务是就绪但屏没建成要说清', () {
+      final s = VirtualDisplayStatus.fromMap({
+        'shizuku': 'ready',
+        'shizukuReady': true,
+        'wireless': 'not_paired',
+        'display': {'ok': false, 'phase': 'failed', 'detail': 'createVirtualDisplay rejected'},
+      });
+      expect(s.usable, isFalse);
+      expect(s.describe(), contains('服务已就绪'));
+      expect(s.describe(), contains('createVirtualDisplay rejected'));
+    });
+
+    test('无线调试的失败原因会带出来', () {
+      final s = VirtualDisplayStatus.fromMap({
+        'shizuku': 'not_running',
+        'wireless': 'failed',
+        'wirelessDetail': '配对码不对',
+      });
+      expect(s.wirelessDetail, '配对码不对');
+      expect(s.describe(), contains('没在运行'));
+    });
   });
 
   group('Assistant.enableVirtualDisplay', () {

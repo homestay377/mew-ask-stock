@@ -32,6 +32,22 @@ class VirtualDisplayChannel {
 
   Future<Map<String, dynamic>> refresh() => _call('refresh');
 
+  /// 用配对码完成无线调试配对（B 路线第一步）。
+  ///
+  /// 用户的动作：系统设置 → 开发者选项 → 无线调试 → 使用配对码配对设备，
+  /// 抄下 6 位码（对话框别关）。端口从 mDNS 自动发现，也可以手填 [port]。
+  Future<Map<String, dynamic>> pairWireless(String code, {int? port}) => _call(
+    'pair_wireless',
+    args: {'code': code, if (port != null) 'port': port},
+    timeout: const Duration(seconds: 30),
+  );
+
+  /// 配对之后拉起 shell 身份助手（B 路线第二步）。成功后再 ensureDisplay 就能建屏。
+  Future<Map<String, dynamic>> startWireless() => _call('start_wireless', timeout: const Duration(seconds: 40));
+
+  /// 解除无线调试配对（删掉本机私钥，下次要重新配）。
+  Future<Map<String, dynamic>> forgetWireless() => _call('forget_wireless');
+
   /// 确保虚拟屏已建（内部会检查 shell 身份、调用 createVirtualDisplay）。
   Future<Map<String, dynamic>> ensureDisplay() => _call('ensure_display', timeout: const Duration(seconds: 25));
 
@@ -88,6 +104,10 @@ class VirtualDisplayStatus {
     required this.shizuku,
     required this.shizukuReady,
     required this.shizukuDetail,
+    this.wireless = 'not_paired',
+    this.wirelessReady = false,
+    this.wirelessDetail,
+    this.source = 'none',
     required this.displayReady,
     required this.displayId,
     required this.displayPhase,
@@ -99,6 +119,14 @@ class VirtualDisplayStatus {
   final String shizuku;
   final bool shizukuReady;
   final String? shizukuDetail;
+
+  /// 无线调试助手的状态：no_key / not_paired / pairing / connecting / ready / failed
+  final String wireless;
+  final bool wirelessReady;
+  final String? wirelessDetail;
+
+  /// 当前用的是哪条路：none / shizuku / wireless
+  final String source;
 
   final bool displayReady;
   final int displayId;
@@ -124,6 +152,10 @@ class VirtualDisplayStatus {
       shizuku: '${m['shizuku'] ?? 'unknown'}',
       shizukuReady: m['shizukuReady'] == true,
       shizukuDetail: m['shizukuDetail']?.toString(),
+      wireless: '${m['wireless'] ?? 'not_paired'}',
+      wirelessReady: m['wirelessReady'] == true,
+      wirelessDetail: m['wirelessDetail']?.toString(),
+      source: '${m['source'] ?? 'none'}',
       displayReady: d['ok'] == true,
       displayId: (d['displayId'] as num?)?.toInt() ?? -1,
       displayPhase: '${d['phase'] ?? 'idle'}',
@@ -137,6 +169,10 @@ class VirtualDisplayStatus {
     if (displayReady) {
       return '虚拟屏已就绪（display=$displayId，shellUid=${shizukuReady ? "2000" : "?"}）'
           '${accessibility ? "，无障碍已连" : "，无障碍未连（读不到界面文字）"}';
+    }
+    if (shizukuReady || wirelessReady) {
+      return '服务已就绪（${source == 'wireless' ? "无线调试助手" : "Shizuku"}），但虚拟屏没建起来'
+          '${displayDetail == null ? "" : "：$displayDetail"}';
     }
     switch (shizuku) {
       case 'unsupported':

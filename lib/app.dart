@@ -13,6 +13,7 @@ import 'ui/pages/extensions_pages.dart';
 import 'ui/pages/history_page.dart';
 import 'ui/pages/misc_settings.dart';
 import 'ui/pages/sub_agents_page.dart';
+import 'ui/pages/virtual_display_page.dart';
 import 'ui/pages/tools_pages.dart';
 import 'ui/settings/providers_page.dart';
 import 'ui/settings/settings_page.dart';
@@ -67,6 +68,7 @@ class _MewHubAppState extends State<MewHubApp> with WidgetsBindingObserver {
     '/settings/quick': (_) => const QuickMessagesPage(),
     '/settings/memory': (_) => const MemoryPage(),
     '/settings/subagents': (_) => const SubAgentsPage(),
+    '/settings/virtual-display': (_) => const VirtualDisplayPage(),
     '/settings/backup': (_) => const BackupPage(),
     '/settings/stats': (_) => const StatsPage(),
     '/settings/about': (_) => const AboutPage(),

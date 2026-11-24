@@ -6,20 +6,25 @@ import android.os.Looper
 import android.util.Log
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.github.homestay377.mewaskstock.adb.AdbDiscovery
+import io.github.homestay377.mewaskstock.adb.AdbStore
+import io.github.homestay377.mewaskstock.adb.WirelessDebugChannel
 import java.util.concurrent.Executors
 
 /**
  * 虚拟屏 ↔ Flutter 的桥。
  *
  * 两件事：
- * 1. **状态**：Shizuku 装没装、跑没跑、有没有授权 → 告诉 UI，让用户一眼看到还缺哪一步；
- * 2. **操作**：建屏、在虚拟屏上打开 App、在虚拟屏上点击/滑动/按键、截图。
+ * 1. **状态**：Shizuku 装没装/跑没跑/授权没授权、无线调试配对没配对 → 让 UI 和模型知道缺哪一步；
+ * 2. **操作**：建屏、在虚拟屏上打开 App、注入触摸/按键、截图。
  *
- * 所有动作都要求 `display` 参数是虚拟屏，**绝不碰主屏**（主屏那套在 MiniPhoneBridge 里）。
+ * 服务来源由 [ShellRouter] 决定（Shizuku 优先，退到无线调试助手），这里不关心 binder 从哪来。
  */
 class VirtualDisplayBridge(
     private val context: Context,
     private val shizuku: ShizukuChannel,
+    private val wireless: WirelessDebugChannel,
+    private val router: ShellRouter,
 ) : MethodChannel.MethodCallHandler {
 
     private val main = Handler(Looper.getMainLooper())
@@ -27,21 +32,37 @@ class VirtualDisplayBridge(
 
     companion object {
         const val CHANNEL = "io.github.homestay377.mewaskstock/virtual_display"
+
+        /** App 侧组装：Shizuku + 无线调试 + 路由。 */
+        fun create(context: Context): Triple<VirtualDisplayBridge, ShizukuChannel, ShellRouter> {
+            val shizuku = ShizukuChannel(context)
+            val store = AdbStore(context)
+            val wireless = WirelessDebugChannel(context, store, AdbDiscovery(context))
+            val router = ShellRouter(context, shizuku, wireless)
+            return Triple(VirtualDisplayBridge(context, shizuku, wireless, router), shizuku, router)
+        }
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            // ---- 状态 ----
+            // ---------- 状态 ----------
             "status" -> {
                 val s = shizuku.current()
+                val w = wireless.current()
+                val r = router.current()
                 val vd = VirtualDisplayManager.current()
                 result.success(
                     mapOf(
                         "shizuku" to s.phase.name.lowercase(),
                         "shizukuReady" to s.ready,
                         "shizukuDetail" to s.detail,
+                        "wireless" to w.phase.name.lowercase(),
+                        "wirelessReady" to w.ready,
+                        "wirelessDetail" to w.detail,
+                        "source" to r.source.name.lowercase(),
+                        "routerNote" to r.note,
                         "display" to vd.toMap(),
-                        "accessibility" to (MiniPhoneA11yState.connected),
+                        "accessibility" to MiniPhoneA11yState.connected,
                     ),
                 )
             }
@@ -50,22 +71,52 @@ class VirtualDisplayBridge(
                 result.success(mapOf("ok" to true, "note" to "已弹出 Shizuku 授权请求"))
             }
             "open_shizuku" -> result.success(mapOf("ok" to shizuku.openShizukuApp()))
-            "refresh" -> {
-                shizuku.refresh()
+
+            // ---------- 无线调试配对（B 路线） ----------
+            "pair_wireless" -> {
+                val code = call.argument<String>("code").orEmpty().trim()
+                val port = call.argument<Int>("port")
+                if (code.isEmpty()) {
+                    result.success(mapOf("ok" to false, "error" to "code_required", "detail" to "需要 6 位配对码"))
+                    return
+                }
+                worker.execute {
+                    val st = wireless.pair(code, port)
+                    main.post {
+                        result.success(
+                            mapOf(
+                                "ok" to (st.phase != WirelessDebugChannel.Phase.FAILED),
+                                "phase" to st.phase.name.lowercase(),
+                                "detail" to st.detail,
+                            ),
+                        )
+                    }
+                }
+            }
+            "start_wireless" -> worker.execute {
+                val st = wireless.startHelper()
+                val svc = wireless.service()
+                main.post {
+                    result.success(
+                        mapOf(
+                            "ok" to (svc != null),
+                            "phase" to st.phase.name.lowercase(),
+                            "detail" to st.detail,
+                        ),
+                    )
+                }
+            }
+            "forget_wireless" -> {
+                wireless.forget()
                 result.success(mapOf("ok" to true))
             }
 
-            // ---- 屏 ----
+            // ---------- 屏 ----------
             "ensure_display" -> {
-                val svc = shizuku.service()
+                val r = router.resolve()
+                val svc = r.service
                 if (svc == null) {
-                    result.success(
-                        mapOf(
-                            "ok" to false,
-                            "error" to "shell_unavailable",
-                            "detail" to (shizuku.current().let { "${it.phase.name.lowercase()} ${it.detail ?: ""}" }),
-                        ),
-                    )
+                    result.success(mapOf("ok" to false, "error" to "shell_unavailable", "detail" to r.note))
                     return
                 }
                 worker.execute {
@@ -73,24 +124,25 @@ class VirtualDisplayBridge(
                         Log.w("VDBridge", "ensure failed", it)
                         VirtualDisplayManager.current()
                     }
-                    main.post { result.success(st.toMap()) }
+                    main.post { result.success(st.toMap() + ("source" to r.source.name.lowercase())) }
                 }
             }
             "release_display" -> {
-                VirtualDisplayManager.stop(shizuku.service())
+                VirtualDisplayManager.stop(router.current().service)
                 result.success(mapOf("ok" to true))
             }
 
-            // ---- 虚拟屏上的动作 ----
+            // ---------- 虚拟屏上的动作 ----------
             else -> {
-                val svc = shizuku.service()
+                val r = router.current()
+                val svc = r.service
                 val display = VirtualDisplayManager.current()
                 if (svc == null || !display.ready) {
                     result.success(
                         mapOf(
                             "ok" to false,
                             "error" to "detached",
-                            "detail" to "虚拟屏没开：先调 ensure_display（Shizuku 需要就绪并授权）",
+                            "detail" to "虚拟屏没开：先调 ensure_display（${r.note}）",
                         ),
                     )
                     return
@@ -112,7 +164,7 @@ class VirtualDisplayBridge(
                                         1 -> mapOf(
                                             "ok" to false,
                                             "error" to "in_use_on_main",
-                                            "detail" to "你正在主屏使用这个 App，先切走再让我开（同一 App 不能同时在两块屏上）",
+                                            "detail" to "你正在主屏用这个 App，先切走再让我开（同一 App 不能同时在两块屏上）",
                                         )
                                         2 -> mapOf("ok" to false, "error" to "not_found", "detail" to "$pkg 没有可启动的界面")
                                         else -> mapOf("ok" to false, "error" to "launch_failed")
