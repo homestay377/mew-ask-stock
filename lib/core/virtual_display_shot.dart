@@ -18,6 +18,10 @@ class VirtualDisplayShot {
   static bool wanted = false;
   static String? _last;
 
+  /// 虚拟屏的真实像素尺寸（`1280×2772`），随截图一起告诉模型：
+  /// 图是缩放过的预览，按图上的像素给坐标会点偏。
+  static String? sizeLabel;
+
   /// 最近一帧的 高/宽。悬浮窗要按真实比例显示，否则 `cover` 会把上下裁掉。
   static final ValueNotifier<double?> aspect = ValueNotifier<double?>(null);
 
