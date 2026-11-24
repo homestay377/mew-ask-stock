@@ -196,8 +196,15 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     }
     VirtualDisplayOverlayState.show();
     // 界面切换需要时间；这里只留很短的一点，避免读到动作前的帧。
-    // 真正的等待交给读屏本身：OCR 那一步本来就要几百毫秒。
     await Future<void>.delayed(const Duration(milliseconds: 180));
+    final st = await d.vd.status();
+    if (!st.accessibility) {
+      // 无障碍没连时读屏只能走 OCR：每次动作后再读一遍要几百毫秒，点起来就很"卡"。
+      // 这里直接返回，让模型需要看的时候自己 vd_observe。
+      sw.stop();
+      return '$what 已下发（${sw.elapsedMilliseconds} ms）。'
+          '无障碍没连，读屏要走 OCR，所以这次没自动读；要看界面再 vd_observe。';
+    }
     final text = await readScreen();
     sw.stop();
     final ms = sw.elapsedMilliseconds;
