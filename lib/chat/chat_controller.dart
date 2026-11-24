@@ -532,7 +532,19 @@ class ChatController extends ChangeNotifier {
           // 只留最新一张：多轮工具调用累计图片会把 token 顶爆
           visionNotes
             ..clear()
-            ..add(ChatMessage(role: Role.user, parts: [ImagePart(shot), TextPart('（上面这张是虚拟屏此刻的画面，供你判断界面用；不是用户发来的。）')]));
+            ..add(
+              ChatMessage(
+                role: Role.user,
+                parts: [
+                  ImagePart(shot),
+                  TextPart(
+                    '（上面这张是虚拟屏此刻的画面，不是用户发来的。'
+                    '${VirtualDisplayShot.sizeLabel == null ? '' : '图片是缩放预览，真实屏是 ${VirtualDisplayShot.sizeLabel}；'}'
+                    '要点击请用 vd_tap 的 ref / text，或按真实像素给坐标，别按图片上的像素算。）',
+                  ),
+                ],
+              ),
+            );
         }
         if (cancel.isCancelled) break;
       }
