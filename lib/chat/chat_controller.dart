@@ -471,7 +471,12 @@ class ChatController extends ChangeNotifier {
           debugPrint('Automatic context compression failed: $e');
         }
       }
-      for (var round = 0; round < 32; round++) {
+      // 一轮对话里最多允许多少个"模型→工具→模型"回合。
+      // 原来写死 32：像"打开 App→搜索→翻页→再点→输入"这种连续操作，四五个回合一步，
+      // 很容易在任务没做完时就撞上限，而且是**静默退出**，看起来就是"莫名其妙停了"。
+      const maxToolRounds = 100;
+      var round = 0;
+      for (; round < maxToolRounds; round++) {
         if (cancel.isCancelled) break;
         final history = [..._conv.currentMessages]..removeLast();
         final prompt = PromptBuilder.build(
@@ -530,6 +535,10 @@ class ChatController extends ChangeNotifier {
             ..add(ChatMessage(role: Role.user, parts: [ImagePart(shot), TextPart('（上面这张是虚拟屏此刻的画面，供你判断界面用；不是用户发来的。）')]));
         }
         if (cancel.isCancelled) break;
+      }
+      if (round >= maxToolRounds && !cancel.isCancelled) {
+        // 撞上限不要静默：留一句，让用户知道可以接着让它做
+        acc.parts.add(TextPart('（单轮已经跑了 $maxToolRounds 个工具回合，我先停在这里——说「继续」我就接着做。）'));
       }
     } on http.RequestAbortedException {
       // stopped by user
