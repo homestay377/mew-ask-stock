@@ -85,12 +85,15 @@ class MiniPhoneChannel {
 ///
 /// 只保留有名字或可交互的元素（原生已经过滤），再按名字去重相邻重复行（列表滚动时的重复条目）。
 String renderScreenForModel(Map<String, dynamic> screen, {int maxElements = 80}) {
-  if (screen['ok'] != true) {
-    return '读屏失败：${screen['error'] ?? 'unknown'}${screen['message'] == null ? '' : '（${screen['message']}）'}';
+  // 两个来源都会进来：MethodChannel 的 Map 和测试里手写的字面量（可能是 Map<Object?, Object?>）。
+  // 统一转成 Map<String, dynamic>，否则 screen['ok'] 取不到，会误报"读屏失败"。
+  final s = screen.map((k, v) => MapEntry('$k', v));
+  if (s['ok'] != true) {
+    return '读屏失败：${s['error'] ?? 'unknown'}${s['message'] == null ? '' : '（${s['message']}）'}';
   }
-  final pkg = screen['package']?.toString();
-  final size = (screen['size'] as List?)?.join('×') ?? '?';
-  final raw = (screen['elements'] as List?) ?? const [];
+  final pkg = s['package']?.toString();
+  final size = (s['size'] as List?)?.join('×') ?? '?';
+  final raw = (s['elements'] as List?) ?? const [];
   final buf = StringBuffer('屏幕：${pkg ?? '未知 App'}（$size），共 ${raw.length} 个元素');
   if (raw.length > maxElements) buf.write('，只列前 $maxElements 个');
   buf.writeln();

@@ -479,19 +479,6 @@ class _AssistantEditPageState extends State<AssistantEditPage> with SingleTicker
               },
             ),
             SwitchListTile(
-              secondary: const IconBadge(Icons.touch_app_rounded),
-              title: Text(t('手机操控', 'Phone control')),
-              subtitle: Text(t('读屏、点击、输入（需开启无障碍服务）', 'Read the screen, tap and type (needs accessibility)')),
-              value: _a.enablePhoneControl,
-              onChanged: (v) async {
-                _save(_a.copyWith(enablePhoneControl: v));
-                if (v) {
-                  final ch = MiniPhoneChannel();
-                  if (!await ch.connected()) await ch.openAccessibilitySettings();
-                }
-              },
-            ),
-            SwitchListTile(
               secondary: const IconBadge(Icons.bookmark_added_outlined),
               title: Text(t('长期记忆', 'Long-term memory')),
               subtitle: Text(t('模型可以记住你的偏好', 'The model can remember your preferences')),
@@ -524,6 +511,25 @@ class _AssistantEditPageState extends State<AssistantEditPage> with SingleTicker
         ),
         SettingsGroup(
           index: 1,
+          title: t('手机与设备', 'Phone & device'),
+          children: [
+            SwitchListTile(
+              secondary: const IconBadge(Icons.touch_app_rounded),
+              title: Text(t('手机操控', 'Phone control')),
+              subtitle: Text(t('读屏、点击、输入（需开启无障碍服务）', 'Read the screen, tap and type (needs accessibility)')),
+              value: _a.enablePhoneControl,
+              onChanged: (v) async {
+                _save(_a.copyWith(enablePhoneControl: v));
+                if (v) {
+                  final ch = MiniPhoneChannel();
+                  if (!await ch.connected()) await ch.openAccessibilitySettings();
+                }
+              },
+            ),
+          ],
+        ),
+        SettingsGroup(
+          index: 2,
           title: t('本地工具', 'Local tools'),
           children: [
             for (final (tool, icon, title, subtitle) in [
