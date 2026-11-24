@@ -82,12 +82,14 @@ class MiniPhoneChannel {
 }
 
 /// 把一次读屏结果裁剪成"给模型看"的紧凑文本：省 token，又保留可点的位置。
-///
 /// 只保留有名字或可交互的元素（原生已经过滤），再按名字去重相邻重复行（列表滚动时的重复条目）。
-String renderScreenForModel(Map<String, dynamic> screen, {int maxElements = 80}) {
+///
+/// 纯函数、不依赖 Flutter：既能在 App 里跑，也能单独用 dart 跑（`tool/mini_phone_render_check.dart`）。
+String renderScreenForModel(Map screen, {int maxElements = 80}) {
   // 两个来源都会进来：MethodChannel 的 Map 和测试里手写的字面量（可能是 Map<Object?, Object?>）。
-  // 统一转成 Map<String, dynamic>，否则 screen['ok'] 取不到，会误报"读屏失败"。
-  final s = screen.map((k, v) => MapEntry(k.toString(), v as dynamic));
+  // 统一转成 Map<String, dynamic>，否则 screen['ok'] 取不到，会误判成"读屏失败"。
+  final s = <String, dynamic>{};
+  screen.forEach((k, v) => s['$k'] = v);
   if (s['ok'] != true) {
     return '读屏失败：${s['error'] ?? 'unknown'}${s['message'] == null ? '' : '（${s['message']}）'}';
   }
@@ -113,10 +115,12 @@ String renderScreenForModel(Map<String, dynamic> screen, {int maxElements = 80})
     ];
     final center = (m['center'] as List?) ?? const [0, 0];
     final line = '${m['ref']} $role「$name」@${center[0]},${center[1]}${flags.isEmpty ? '' : ' [${flags.join(' ')}]'}';
-    // 列表滚动常出现连续同名条目，只留第一条
-    if (line == lastLine) continue;
+    // 列表滚动常出现连续同名条目（各自的 ref 不同），只留第一条：
+    // 去重看的是"角色 + 名字 + 坐标"，不看 ref
+    final key = '$role|$name|${center[0]},${center[1]}';
+    if (key == lastLine) continue;
     buf.writeln(line);
-    lastLine = line;
+    lastLine = key;
     shown++;
   }
   return buf.toString().trimRight();

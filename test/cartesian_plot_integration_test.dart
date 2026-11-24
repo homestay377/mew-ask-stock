@@ -50,6 +50,9 @@ void main() {
     await tester.tap(find.text('工具'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('坐标系显示'), 220, scrollable: find.byType(Scrollable).last);
+    // 工具页会随功能增加变长：滚到目标后再保证它整体在视口里，否则 tap 会落在屏幕外。
+    await tester.ensureVisible(find.text('坐标系显示'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('坐标系显示'));
     await tester.pumpAndSettle();
     expect(store.value.assistantById('math')!.localTools, contains(LocalTool.cartesianPlot));
