@@ -51,13 +51,29 @@ ShellDisplayService（跑在 shell 身份进程）
 | 工具 | 作用 |
 |---|---|
 | `vd_status` | 现在能不能用：Shizuku 跑没跑、授权没授权、屏建没建 |
-| `vd_prepare` | 走一遍 授权 → 绑定 → 建屏；缺哪步就说哪步 |
+| `vd_prepare` | **排障用**：强制重建屏。正常流程不需要它，见下节 |
 | `vd_open` | 打开 App（**中文名或包名都行**，名字→包名由 PackageManager 解析） |
 | `vd_apps` | 列已装 App；默认只列行情相关，可 `all=true` |
-| `vd_observe` / `vd_find` | 读那块的界面（元素 + ref + 坐标） |
-| `vd_tap` / `vd_scroll` / `vd_type` / `vd_back` | 点、滚、输入、返回 |
+| `vd_observe` / `vd_find` | 读那块的界面（元素 + ref + 坐标；没有无障碍时退到本机 OCR） |
+| `vd_tap` | 点：`ref` / `text`（自动在无障碍树和 OCR 里找）/ `x,y` 三种给法 |
+| `vd_scroll` / `vd_type` / `vd_back` | 滚、输入（需 ref）、返回 |
 
 写动作后**自动再读一次屏**，模型不用多花一轮确认。
+
+### 自动建屏（不需要用户点「准备」）
+
+任何 `vd_*` 工具入口都先走 `ensureReady()`：
+
+1. 已经有屏 → 直接用（只读 `status()`，不额外调用）；
+2. 没屏 → **静默** `ensure_display`；
+3. 缺前提才报，而且只报那一步：
+   - `need_permission` → 自动弹一次 Shizuku 授权框（每进程只弹一次），等 3 秒复查；
+   - `not_running` → 自动打开 Shizuku，让用户点「启动服务」；
+   - `not_installed` → 提示装 Shizuku 或走无线调试。
+
+并发安全：建屏用 **单次 `Future` 锁**（`building`），同轮多个工具同时触发也只建一块屏。
+
+原则：**用户已经给过权限之后，不许再让他手动准备**。
 
 ## 5. 两条身份路线
 
@@ -85,6 +101,7 @@ Shizuku 状态机（`ShizukuChannel`）：`not_installed / not_running / need_pe
 - **同一个 App 不能同时在两块屏上**：你在主屏用着同花顺时，虚拟屏打不开它（返回 `in_use_on_main`）。
 - 部分 App 在非默认显示器上会闪退或白屏（同花顺在 Mika 那边实测正常，我们这台还没验）。
 - 虚拟屏的截图**不是**数据源，只用来兜底（App 用了不暴露无障碍的自绘界面时）。
+- **不连无障碍时只能读文字、不能输入**：OCR 给文字和坐标，能点不能打字（打字的输入框定位依赖无障碍树）。
 - 支付、登录验证码不自动填，交给用户。
 - Shizuku 服务重启会导致 binder 断开，需要重绑（工具会提示）。
 

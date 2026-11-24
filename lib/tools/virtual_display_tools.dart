@@ -33,12 +33,68 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
   if (!Platform.isAndroid) return const [];
   final d = deps ?? VirtualDisplayDeps();
 
-  /// 统一的"还没就绪"提示：说清缺哪一步，不要笼统报错。
-  Future<String?> requireDisplay() async {
+  // ── 自动建屏 ──────────────────────────────────────────────────
+  // 权限给过之后，用户不该再被要求点「准备虚拟屏」。这里静默建屏，
+  // 只有真的缺前提（服务没跑 / 没授权 / 系统拒绝）才把**那一步**报出来。
+  var displayId = -1;
+  var askedPermission = false;
+  Future<String?>? building;
+
+  /// 就绪返回 `null`，否则返回「缺哪一步」的一句话。
+  ///
+  /// 并发调用只建一次屏（Future 锁）：一次对话里几个工具同时触发时，
+  /// 不会建出两块屏、也不会互相把对方的 displayId 覆盖掉。
+  Future<String?> ensureReady({bool force = false}) async {
     final st = await d.vd.status();
-    if (st.usable) return null;
-    return '虚拟屏还没就绪。${st.describe()}\n'
-        '（需要：Shizuku 服务运行中 + 给问股授权；或在设置里完成无线调试配对）';
+    if (!force && st.usable) {
+      displayId = st.displayId;
+      return null;
+    }
+    final inflight = building ??= _build(force: force).whenComplete(() => building = null);
+    return await inflight;
+  }
+
+  Future<String?> _build({required bool force}) async {
+    var st = await d.vd.status();
+
+    // 1) 先把「Shizuku 服务 / 授权」这一步尽量替用户走完。
+    if (!st.shizukuReady && !st.wirelessReady) {
+      if (st.shizuku == 'need_permission') {
+        if (!askedPermission) {
+          askedPermission = true;
+          await d.vd.requestPermission(); // 弹一次系统授权框，用户点「允许」即可
+          await Future<void>.delayed(const Duration(seconds: 3));
+          st = await d.vd.status();
+        }
+        if (!st.shizukuReady && !st.wirelessReady) {
+          return '差最后一步：请在 Shizuku 的弹窗里给「问股」点「允许」，之后我自己建屏。${st.describe()}';
+        }
+      } else if (st.shizuku == 'not_running') {
+        await d.vd.openShizuku();
+        return 'Shizuku 服务没在运行，我已经帮你打开了 Shizuku：点「启动服务」就行，屏我自己建，不用再点准备。';
+      } else if (st.shizuku == 'not_installed') {
+        return '这台机器还没装 Shizuku。装好并启动服务（或在设置里用无线调试配对）之后，我自己会建屏。';
+      }
+    }
+
+    // 2) 建屏。重复调用是安全的：native 侧已经 ready 就直接返回原屏。
+    final r = await d.vd.ensureDisplay();
+    if (r['ok'] == true) {
+      displayId = (r['displayId'] as num?)?.toInt() ?? -1;
+      // 第一帧会晚半拍，稍等一下，免得下一句就读到空屏
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      return null;
+    }
+
+    // 3) 失败：把「原因」和「下一步」分开说，别笼统说没准备好。
+    final after = await d.vd.status();
+    final detail = '${r['detail'] ?? after.displayDetail ?? ''}'.trim();
+    final err = '${r['error'] ?? ''}';
+    if (err == 'shell_unavailable') {
+      return 'Shizuku 服务还没连上，建不了屏。${detail.isEmpty ? after.describe() : detail}';
+    }
+    final why = detail.isEmpty ? after.describe() : '${after.describe()}（$detail）';
+    return force ? '重建虚拟屏失败：$why' : '虚拟屏没建起来：$why';
   }
 
   /// 读虚拟屏。
@@ -50,32 +106,36 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
   ///
   /// 所以"没开无障碍"不等于用不了——这正是 Mika 的做法。
   Future<String> readScreen({int maxElements = kVirtualMaxElements, bool withImage = false}) async {
+    final off = await ensureReady();
+    if (off != null) return off;
     final st = await d.vd.status();
-    if (!st.usable) return st.describe();
+    final id = st.usable ? st.displayId : displayId;
 
     // 1. 无障碍树
-    final snap = await d.phone.observe(displayId: st.displayId, resourceIds: false);
+    final snap = await d.phone.observe(displayId: id, resourceIds: false);
     final elements = (snap['elements'] as List?) ?? const [];
     if (snap['ok'] == true && elements.isNotEmpty) {
       return renderScreenForModel(snap, maxElements: maxElements);
     }
 
-    // 2. 本机 OCR
-    final lines = await d.vd.ocr();
-    if (lines.isNotEmpty) {
-      return renderOcrForModel(lines, maxElements: maxElements);
+    // 2. 本机 OCR。刚建屏或刚启动 App 时第一帧可能还没到，等一下重试一次。
+    for (var i = 0; i < 2; i++) {
+      final lines = await d.vd.ocr();
+      if (lines.isNotEmpty) return renderOcrForModel(lines, maxElements: maxElements);
+      if (i == 0) await Future<void>.delayed(const Duration(milliseconds: 600));
     }
 
     // 3. 都没有：说清可能的原因，别谎称"空屏"
     if (withImage) {
       final png = await d.vd.screenshot();
-      if (png != null) {
-        return '虚拟屏上没有可读文字（App 可能还没画完，或页面本身没字）。'
-            '已截一张图（${png.length} 字节）。可以等 1-2 秒再 mini_vd_observe。';
+      if (png == null) {
+        return '虚拟屏上还没出画面（display=$id）。App 可能刚启动，等 1-2 秒再 vd_observe。';
       }
+      return '虚拟屏有画面但没有文字：这页可能是图表/纯图界面，或者还没画完。'
+          '无障碍没连的时候只能读文字；这种情况可以给 vd_tap 坐标直接点，或稍等再 vd_observe。';
     }
-    return '虚拟屏上现在没有可读内容（display=${st.displayId}）。'
-        '如果还没打开 App，先 mini_vd_open；打开后等 1-2 秒再 mini_vd_observe。';
+    return '虚拟屏上现在没有可读内容（display=$id）。'
+        '如果还没打开 App，先 vd_open；打开后等 1-2 秒再 vd_observe。';
   }
 
   /// 动作之后自动再读一次屏，模型不用多花一轮确认。
@@ -102,6 +162,9 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
       execute: (_) async {
         final st = await d.vd.status();
         final buf = StringBuffer(st.describe());
+        if (!st.usable) {
+          buf.write('\n（不用手动准备：任意 vd_* 工具都会自己建屏，只有缺 Shizuku 服务/授权时才需要你动手）');
+        }
         if (st.shizukuDetail != null) buf.write('\nShizuku 细节：${st.shizukuDetail}');
         if (st.displayDetail != null) buf.write('\n虚拟屏细节：${st.displayDetail}');
         return buf.toString();
@@ -109,34 +172,18 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     ),
     AppTool(
       name: 'vd_prepare',
-      displayName: '准备虚拟屏',
+      displayName: '重建虚拟屏（排障）',
       description:
-          '让虚拟屏准备好（Shizuku 授权 → 绑定 → 建屏）。'
-          '需要用户去开 Shizuku 或点授权时，会把那一步说出来。',
+          '正常情况**不需要调用**：其它 vd_* 工具都会自动建屏。'
+          '只在屏卡住、画面不刷新、被系统回收后想强制重建时用它。',
       parameters: objectSchema({}),
       execute: (_) async {
+        await d.vd.releaseDisplay();
+        final off = await ensureReady(force: true);
+        if (off != null) return off;
         final st = await d.vd.status();
-        if (!st.shizukuReady) {
-          switch (st.shizuku) {
-            case 'not_installed':
-              return '没检测到 Shizuku。两条路：① 安装 Shizuku 并启动服务；② 用无线调试配对，让我自己拉起助手。';
-            case 'not_running':
-              await d.vd.openShizuku();
-              return 'Shizuku 已安装但没在运行，我已经帮你打开了 Shizuku，请在里面点「启动服务」；好了再让我准备一次。';
-            case 'need_permission':
-              await d.vd.requestPermission();
-              return '已向 Shizuku 请求授权，请在弹窗里点「允许」；好了再让我准备一次。';
-            default:
-              return 'Shizuku 状态：${st.describe()}';
-          }
-        }
-        final r = await d.vd.ensureDisplay();
-        if (r['ok'] == true) {
-          final st2 = await d.vd.status();
-          return '虚拟屏已就绪（display=${st2.displayId}）。'
-              '${st2.accessibility ? '' : '注意：无障碍没连，读不到界面文字，只能截图。'}';
-        }
-        return '建虚拟屏失败：${r['error'] ?? ''} ${r['detail'] ?? ''}'.trim();
+        return '虚拟屏已重建（display=${st.displayId}）。'
+            '${st.accessibility ? '' : '注意：无障碍没连，只能读 OCR 文字，不能按 ref 输入。'}';
       },
     ),
     AppTool(
@@ -153,14 +200,8 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
       execute: (args) async {
         final raw = '${args['app'] ?? ''}'.trim();
         if (raw.isEmpty) return '需要给出 app（名字或包名）。';
-        final st = await d.vd.status();
-        if (!st.usable) {
-          final prep = await d.vd.ensureDisplay();
-          if (prep['ok'] != true) {
-            final after = await d.vd.status();
-            return '虚拟屏没准备好，打不开 App。${after.describe()}';
-          }
-        }
+        final off = await ensureReady();
+        if (off != null) return '虚拟屏没准备好，打不开 App。$off';
         // 名字 → 包名：让原生用 PackageManager 查（和模型自己猜包名比，这个准）
         final resolve = await d.phone.findApp(raw);
         if (resolve['ok'] != true) {
@@ -223,10 +264,11 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
       displayName: '看虚拟屏',
       description:
           '读虚拟屏当前界面：元素（文字、按钮、输入框）与坐标，每条带 ref。'
-          'ref 只在这次读屏内有效，点击后要重新 observe。',
+          '没开无障碍时自动退到本机 OCR，给「文字 + 坐标」。'
+          '会自动建屏，不用先调准备。ref 只在这次读屏内有效，点击后要重新 observe。',
       parameters: objectSchema({'maxElements': intProp('最多返回多少个元素，默认 $kVirtualMaxElements')}),
       execute: (args) async {
-        final off = await requireDisplay();
+        final off = await ensureReady();
         if (off != null) return off;
         final n = (args['maxElements'] as num?)?.toInt() ?? kVirtualMaxElements;
         return readScreen(maxElements: n, withImage: true);
@@ -238,46 +280,68 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
       description: '在虚拟屏上按文字查元素，返回 ref。比 vd_observe 省 token，适合长列表（行情列表、公告、F10）。',
       parameters: objectSchema({'text': strProp('要匹配的文字')}, required: ['text']),
       execute: (args) async {
-        final off = await requireDisplay();
+        final off = await ensureReady();
         if (off != null) return off;
         final st = await d.vd.status();
         final q = '${args['text'] ?? ''}'.trim().toLowerCase();
         if (q.isEmpty) return '需要 text。';
         final snap = await d.phone.observe(displayId: st.displayId);
-        if (snap['ok'] != true) return '读虚拟屏失败：${snap['error']}';
         final all = (snap['elements'] as List?) ?? const [];
-        final hits = all.where((e) {
-          final m = (e as Map);
-          return '${m['name'] ?? ''}'.toLowerCase().contains(q) || '${m['resourceId'] ?? ''}'.toLowerCase().contains(q);
-        }).toList();
-        if (hits.isEmpty) {
-          return '虚拟屏上没有匹配「${args['text']}」的元素（共 ${all.length} 个）。可能在下面，先 vd_scroll 再看。';
+        final hits = snap['ok'] == true
+            ? all.where((e) {
+                final m = (e as Map);
+                return '${m['name'] ?? ''}'.toLowerCase().contains(q) ||
+                    '${m['resourceId'] ?? ''}'.toLowerCase().contains(q);
+              }).toList()
+            : const [];
+
+        // 无障碍树里有就优先用它：带 ref，可点、可输入。
+        if (hits.isNotEmpty) {
+          final buf = StringBuffer('匹配 ${hits.length} 个：');
+          for (final e in hits.take(20)) {
+            final m = (e as Map);
+            final c = (m['center'] as List?) ?? const [0, 0];
+            buf.write(
+              '\n${m['ref']} ${m['role']}「${m['name']}」@${c[0]},${c[1]}'
+              '${m['clickable'] == true ? ' [可点]' : ''}${m['editable'] == true ? ' [可输入]' : ''}',
+            );
+          }
+          return buf.toString();
         }
-        final buf = StringBuffer('匹配 ${hits.length} 个：');
-        for (final e in hits.take(20)) {
-          final m = (e as Map);
-          final c = (m['center'] as List?) ?? const [0, 0];
-          buf.write(
-            '\n${m['ref']} ${m['role']}「${m['name']}」@${c[0]},${c[1]}'
-            '${m['clickable'] == true ? ' [可点]' : ''}${m['editable'] == true ? ' [可输入]' : ''}',
-          );
+
+        // 退到 OCR：没开无障碍时这是唯一能定位文字的路，结果是坐标。
+        final lines = await d.vd.ocr();
+        final ocrHits = lines.where((l) => '${l['text'] ?? ''}'.toLowerCase().contains(q)).toList();
+        if (ocrHits.isNotEmpty) {
+          final buf = StringBuffer('无障碍树没匹配到，但屏幕文字里找到 ${ocrHits.length} 行（OCR，点用坐标）：');
+          for (final l in ocrHits.take(20)) {
+            final c = (l['center'] as List?) ?? const [0, 0];
+            buf.write('\n「${l['text']}」@${c[0]},${c[1]}');
+          }
+          buf.write('\n（要输入文字得先开无障碍服务，OCR 只能点不能打字）');
+          return buf.toString();
         }
-        return buf.toString();
+
+        final total = snap['ok'] == true ? '共 ${all.length} 个元素' : '无障碍没连';
+        return '虚拟屏上没有匹配「${args['text']}」的内容（$total / ${lines.length} 行文字）。'
+            '可能在下面，先 vd_scroll 再看。';
       },
     ),
     AppTool(
       name: 'vd_tap',
       displayName: '点虚拟屏',
       description:
-          '点虚拟屏上的元素（传 ref）或坐标。'
-          '没有 ref（比如只有 OCR 结果）时传 x/y 即可，坐标来自 observe 输出。动作后自动再读一次屏。',
+          '点虚拟屏上的东西。三种给法，从稳到糙：'
+          '① ref（observe/find 给的元素编号）；② text（要点的文字，自动在无障碍树和 OCR 结果里找）；'
+          '③ x/y 坐标。动作后自动再读一次屏。',
       parameters: objectSchema({
         'ref': strProp('元素编号，如 @e12'),
+        'text': strProp('要点的文字，如「自选股」「F10」「买入」；找不到会告诉你'),
         'x': intProp('X 坐标（虚拟屏像素）'),
         'y': intProp('Y 坐标（虚拟屏像素）'),
       }),
       execute: (args) async {
-        final off = await requireDisplay();
+        final off = await ensureReady();
         if (off != null) return off;
         final st = await d.vd.status();
         final ref = '${args['ref'] ?? ''}'.trim();
@@ -294,9 +358,30 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
           final y = (c[1] as num).toInt();
           return actThenLook('点 $ref「${hit['name']}」', () => d.vd.tap(x, y));
         }
+        // 按文字点：先无障碍树（准），没有再 OCR（只有文字行）
+        final want = '${args['text'] ?? ''}'.trim().toLowerCase();
+        if (want.isNotEmpty) {
+          final snap = await d.phone.observe(displayId: st.displayId);
+          for (final e in ((snap['elements'] as List?) ?? const [])) {
+            final m = (e as Map);
+            if ('${m['name'] ?? ''}'.toLowerCase().trim() != want) continue;
+            final c = (m['center'] as List?) ?? const [0, 0];
+            return actThenLook('点「${m['name']}」', () => d.vd.tap((c[0] as num).toInt(), (c[1] as num).toInt()));
+          }
+          final lines = await d.vd.ocr();
+          final exact = lines.where((l) => '${l['text'] ?? ''}'.toLowerCase().trim() == want).toList();
+          final fuzzy = lines.where((l) => '${l['text'] ?? ''}'.toLowerCase().contains(want)).toList();
+          final pick = exact.isNotEmpty ? exact.first : (fuzzy.isNotEmpty ? fuzzy.first : null);
+          if (pick == null) {
+            return '虚拟屏上没有「${args['text']}」这个文字。先 vd_observe 看现在是什么界面。';
+          }
+          final c = (pick['center'] as List?) ?? const [0, 0];
+          return actThenLook('点「${pick['text']}」', () => d.vd.tap((c[0] as num).toInt(), (c[1] as num).toInt()));
+        }
+
         final x = (args['x'] as num?)?.toInt();
         final y = (args['y'] as num?)?.toInt();
-        if (x == null || y == null) return '需要 ref，或者 x 和 y。';
+        if (x == null || y == null) return '需要 ref，或者 text，或者 x 和 y。';
         return actThenLook('点 ($x,$y)', () => d.vd.tap(x, y));
       },
     ),
@@ -309,7 +394,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
         'amount': intProp('滑动距离（像素），默认 600'),
       }),
       execute: (args) async {
-        final off = await requireDisplay();
+        final off = await ensureReady();
         if (off != null) return off;
         final st = await d.vd.status();
         final snap = await d.phone.observe(displayId: st.displayId);
@@ -335,15 +420,15 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
       description: '往虚拟屏的输入框写文字。传 ref 定位；不传则用坐标。',
       parameters: objectSchema({'ref': strProp('输入框的 ref'), 'text': strProp('要输入的文字')}, required: ['text']),
       execute: (args) async {
-        final off = await requireDisplay();
+        final off = await ensureReady();
         if (off != null) return off;
         final st = await d.vd.status();
         final text = '${args['text'] ?? ''}';
         if (text.isEmpty) return '需要 text。';
         final ref = '${args['ref'] ?? ''}'.trim();
         if (ref.isEmpty) {
-          // 没有 ref：先点一下屏幕上的输入框由模型自己给坐标，这里直接报错更清楚
-          return '需要 ref：先 vd_observe 看清输入框的编号。';
+          return '输入需要 ref（输入框编号）：先 vd_observe 看有没有 [可输入] 的元素。'
+              '如果只读到 OCR 文字，说明无障碍没连——虚拟屏打字必须靠无障碍树定位输入框。';
         }
         final r = await d.phone.typeText(ref, text, displayId: st.displayId, clear: true);
         if (r['ok'] != true) return '输入失败：${r['error']}';
@@ -357,7 +442,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
       description: '在虚拟屏上按返回键（不会影响你自己的屏幕）。',
       parameters: objectSchema({}),
       execute: (_) async {
-        final off = await requireDisplay();
+        final off = await ensureReady();
         if (off != null) return off;
         return actThenLook('按返回', () => d.vd.pressKey('back'));
       },

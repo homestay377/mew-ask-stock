@@ -111,9 +111,12 @@ class _VirtualDisplayPageState extends State<VirtualDisplayPage> {
               SettingsGroup(
                 title: t('路线 1 · Shizuku', 'Route 1 · Shizuku'),
                 footer: t(
-                  '三步：启动 Shizuku 服务 → 给问股授权 → 准备虚拟屏。'
+                  '两步：启动 Shizuku 服务 → 给问股授权。'
+                      '之后 AI 用虚拟屏时会**自己建屏**，不用再手动准备；'
+                      '下面的「建屏」按钮只在屏卡住时排障用。'
                       '装过 Shizuku 但重装了问股的话，要在这里重新授权一次（授权是按 uid 记的）。',
-                  'Start Shizuku → grant this app → prepare the display.',
+                  'Start Shizuku → grant this app. The AI builds the display itself; '
+                      'the button below is only for troubleshooting.',
                 ),
                 children: [
                   ListTile(
@@ -150,7 +153,7 @@ class _VirtualDisplayPageState extends State<VirtualDisplayPage> {
                   ),
                   ListTile(
                     leading: const IconBadge(Icons.layers_rounded),
-                    title: Text(t('3. 准备虚拟屏', '3. Prepare display')),
+                    title: Text(t('建屏（排障用）', 'Build display (troubleshooting)')),
                     onTap: () => _run(_ch.ensureDisplay, t('虚拟屏已就绪', 'Display ready')),
                   ),
                 ],
