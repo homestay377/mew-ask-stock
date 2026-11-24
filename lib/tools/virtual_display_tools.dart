@@ -603,7 +603,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
           '**这块屏没有系统导航栏**（不像你手机那样有手势条/三大金刚），'
           '所以页面里找不到"返回"按钮时，返回就靠它——不要因为看不到按钮就停下来。',
       parameters: objectSchema({
-        'key': strProp('back / home', enumValues: ['back', 'home']),
+        'key': strProp('back / home / recents', enumValues: ['back', 'home', 'recents']),
       }),
       promptHint:
           '虚拟屏上没有系统导航栏。要回上一页就调 vd_back（默认 back），不要去找页面上的返回按钮；'
