@@ -40,6 +40,22 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
   var askedPermission = false;
   Future<String?>? building;
 
+  /// 调一次 `ensure_display`，并对「身份还在绑」这种瞬时状态重试。
+  ///
+  /// Shizuku 刚授权、刚重启服务时 binder 还没绑上，native 会返回 `shell_unavailable`。
+  /// 这时不该告诉用户「没准备好」——它只是还在连。最多等约 6 秒，每次重试都顺手
+  /// 触发一次绑定（`refresh` 内部会 bind）。
+  Future<Map<String, dynamic>> ensureDisplayWithRetry() async {
+    var r = await d.vd.ensureDisplay();
+    for (var i = 0; i < 7 && r['ok'] != true; i++) {
+      if ('${r['error'] ?? ''}' != 'shell_unavailable') break;
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      await d.vd.refresh();
+      r = await d.vd.ensureDisplay();
+    }
+    return r;
+  }
+
   /// 真正建屏的那一步：先尽量补上缺失的服务/授权，再调 ensure_display。
   /// 失败时只说「缺哪一步」，不说笼统的"没准备好"。
   Future<String?> buildOnce({required bool force}) async {
@@ -83,22 +99,6 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     }
     final why = detail.isEmpty ? after.describe() : '${after.describe()}（$detail）';
     return force ? '重建虚拟屏失败：$why' : '虚拟屏没建起来：$why';
-  }
-
-  /// 调一次 `ensure_display`，并对「身份还在绑」这种瞬时状态重试。
-  ///
-  /// Shizuku 刚授权、刚重启服务时 binder 还没绑上，native 会返回 `shell_unavailable`。
-  /// 这时不该告诉用户「没准备好」——它只是还在连。最多等约 6 秒，每次重试都顺手
-  /// 触发一次绑定（`refresh` 内部会 bind）。
-  Future<Map<String, dynamic>> ensureDisplayWithRetry() async {
-    var r = await d.vd.ensureDisplay();
-    for (var i = 0; i < 7 && r['ok'] != true; i++) {
-      if ('${r['error'] ?? ''}' != 'shell_unavailable') break;
-      await Future<void>.delayed(const Duration(milliseconds: 800));
-      await d.vd.refresh();
-      r = await d.vd.ensureDisplay();
-    }
-    return r;
   }
 
   /// 就绪返回 `null`，否则返回「缺哪一步」的一句话。
