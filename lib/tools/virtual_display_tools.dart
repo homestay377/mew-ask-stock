@@ -187,7 +187,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     final snap = await d.phone.observe(displayId: id, resourceIds: false);
     final elements = (snap['elements'] as List?) ?? const [];
     if (snap['ok'] == true && elements.isNotEmpty) {
-      return withSize(st, withShot(renderScreenForModel(snap, maxElements: maxElements)));
+      return withSize(st, await withShot(renderScreenForModel(snap, maxElements: maxElements)));
     }
 
     // 2. 本机 OCR。默认只认一次——每次动作都多花 600ms 重试，点起来就是"慢".
@@ -196,9 +196,13 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     if (lines.isEmpty && retryEmpty) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
       lines = await d.vd.ocr();
-      if (lines.isNotEmpty) return withSize(st, withShot(renderOcrForModel(lines, maxElements: maxElements)));
+      if (lines.isNotEmpty) {
+        return withSize(st, await withShot(renderOcrForModel(lines, maxElements: maxElements)));
+      }
     }
-    if (lines.isNotEmpty) return withSize(st, withShot(renderOcrForModel(lines, maxElements: maxElements)));
+    if (lines.isNotEmpty) {
+      return withSize(st, await withShot(renderOcrForModel(lines, maxElements: maxElements)));
+    }
 
     // 3. 都没有：说清可能的原因，别谎称"空屏"
     if (withImage) {
