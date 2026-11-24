@@ -40,21 +40,9 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
   var askedPermission = false;
   Future<String?>? building;
 
-  /// 就绪返回 `null`，否则返回「缺哪一步」的一句话。
-  ///
-  /// 并发调用只建一次屏（Future 锁）：一次对话里几个工具同时触发时，
-  /// 不会建出两块屏、也不会互相把对方的 displayId 覆盖掉。
-  Future<String?> ensureReady({bool force = false}) async {
-    final st = await d.vd.status();
-    if (!force && st.usable) {
-      displayId = st.displayId;
-      return null;
-    }
-    final inflight = building ??= _build(force: force).whenComplete(() => building = null);
-    return await inflight;
-  }
-
-  Future<String?> _build({required bool force}) async {
+  /// 真正建屏的那一步：先尽量补上缺失的服务/授权，再调 ensure_display。
+  /// 失败时只说「缺哪一步」，不说笼统的"没准备好"。
+  Future<String?> buildOnce({required bool force}) async {
     var st = await d.vd.status();
 
     // 1) 先把「Shizuku 服务 / 授权」这一步尽量替用户走完。
@@ -95,6 +83,20 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     }
     final why = detail.isEmpty ? after.describe() : '${after.describe()}（$detail）';
     return force ? '重建虚拟屏失败：$why' : '虚拟屏没建起来：$why';
+  }
+
+  /// 就绪返回 `null`，否则返回「缺哪一步」的一句话。
+  ///
+  /// 并发调用只建一次屏（Future 锁）：一次对话里几个工具同时触发时，
+  /// 不会建出两块屏、也不会互相把对方的 displayId 覆盖掉。
+  Future<String?> ensureReady({bool force = false}) async {
+    final st = await d.vd.status();
+    if (!force && st.usable) {
+      displayId = st.displayId;
+      return null;
+    }
+    final inflight = building ??= buildOnce(force: force).whenComplete(() => building = null);
+    return await inflight;
   }
 
   /// 读虚拟屏。
