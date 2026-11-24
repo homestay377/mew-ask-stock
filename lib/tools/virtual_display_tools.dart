@@ -147,6 +147,15 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
   /// 3. 都不行才说读不到。
   ///
   /// 所以"没开无障碍"不等于用不了——这正是 Mika 的做法。
+  /// 在结果前面写明"坐标按这个尺寸算"，避免模型拿截图（缩放预览）的像素当坐标。
+  String withSize(VirtualDisplayStatus st, String text) {
+    final w = st.displayWidth;
+    final h = st.displayHeight;
+    if (w == null || h == null) return text;
+    VirtualDisplayShot.sizeLabel = '$w×$h';
+    return '虚拟屏 $w×$h（坐标都按这个像素尺寸，不是截图尺寸）\n\n$text';
+  }
+
   /// 多模态模型：读屏成功时把这一帧存下来，交给下一轮请求当图片附件。
   /// 不支持视觉的模型不截图（[VirtualDisplayShot.wanted] 为 false），省一次 PNG 编码。
   Future<String> withShot(String text) async {
@@ -178,7 +187,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     final snap = await d.phone.observe(displayId: id, resourceIds: false);
     final elements = (snap['elements'] as List?) ?? const [];
     if (snap['ok'] == true && elements.isNotEmpty) {
-      return withShot(renderScreenForModel(snap, maxElements: maxElements));
+      return withSize(st, withShot(renderScreenForModel(snap, maxElements: maxElements)));
     }
 
     // 2. 本机 OCR。默认只认一次——每次动作都多花 600ms 重试，点起来就是"慢".
@@ -187,9 +196,9 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     if (lines.isEmpty && retryEmpty) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
       lines = await d.vd.ocr();
-      if (lines.isNotEmpty) return withShot(renderOcrForModel(lines, maxElements: maxElements));
+      if (lines.isNotEmpty) return withSize(st, withShot(renderOcrForModel(lines, maxElements: maxElements)));
     }
-    if (lines.isNotEmpty) return withShot(renderOcrForModel(lines, maxElements: maxElements));
+    if (lines.isNotEmpty) return withSize(st, withShot(renderOcrForModel(lines, maxElements: maxElements)));
 
     // 3. 都没有：说清可能的原因，别谎称"空屏"
     if (withImage) {
@@ -478,6 +487,13 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
         final x = (args['x'] as num?)?.toInt();
         final y = (args['y'] as num?)?.toInt();
         if (x == null || y == null) return '需要 ref，或者 text，或者 x 和 y。';
+        // 坐标边界校验：把"按截图尺寸算"这种错挡在外面，而不是点在乱七八糟的地方
+        final w = st.displayWidth;
+        final h = st.displayHeight;
+        if (w != null && h != null && (x < 0 || y < 0 || x >= w || y >= h)) {
+          return '坐标 ($x,$y) 超出虚拟屏（$w×$h）。坐标按这块屏的像素给，'
+              '或者直接用 ref / text 点——那样不用关心数值。';
+        }
         return actThenLook('点 ($x,$y)', () => d.vd.tap(x, y));
       },
     ),
