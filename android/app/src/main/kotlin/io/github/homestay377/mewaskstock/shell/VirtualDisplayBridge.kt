@@ -9,6 +9,11 @@ import io.flutter.plugin.common.MethodChannel
 import io.github.homestay377.mewaskstock.adb.AdbDiscovery
 import io.github.homestay377.mewaskstock.adb.AdbStore
 import io.github.homestay377.mewaskstock.adb.WirelessDebugChannel
+import io.github.homestay377.mewaskstock.pairing.PairingCodeReader
+import io.github.homestay377.mewaskstock.pairing.PairingCodeReceiver
+import io.github.homestay377.mewaskstock.pairing.PairingCodeSink
+import io.github.homestay377.mewaskstock.pairing.PairingCoordinator
+import io.github.homestay377.mewaskstock.pairing.PairingNotifier
 import java.util.concurrent.Executors
 
 /**
@@ -25,6 +30,7 @@ class VirtualDisplayBridge(
     private val shizuku: ShizukuChannel,
     private val wireless: WirelessDebugChannel,
     private val router: ShellRouter,
+    private val pairing: PairingCoordinator,
 ) : MethodChannel.MethodCallHandler {
 
     private val main = Handler(Looper.getMainLooper())
@@ -34,12 +40,16 @@ class VirtualDisplayBridge(
         const val CHANNEL = "io.github.homestay377.mewaskstock/virtual_display"
 
         /** App 侧组装：Shizuku + 无线调试 + 路由。 */
-        fun create(context: Context): Triple<VirtualDisplayBridge, ShizukuChannel, ShellRouter> {
+        fun create(context: Context): VirtualDisplayBridge {
             val shizuku = ShizukuChannel(context)
             val store = AdbStore(context)
-            val wireless = WirelessDebugChannel(context, store, AdbDiscovery(context))
+            val discovery = AdbDiscovery(context)
+            val wireless = WirelessDebugChannel(context, store, discovery)
             val router = ShellRouter(context, shizuku, wireless)
-            return Triple(VirtualDisplayBridge(context, shizuku, wireless, router), shizuku, router)
+            val pairing = PairingCoordinator(context, store, discovery)
+            // 通知栏输入框的落点接上
+            PairingCodeReceiver.sink = PairingCodeSink { code, port -> pairing.pair(code, port) }
+            return VirtualDisplayBridge(context, shizuku, wireless, router, pairing)
         }
     }
 
@@ -55,12 +65,15 @@ class VirtualDisplayBridge(
                     mapOf(
                         "shizuku" to s.phase.name.lowercase(),
                         "shizukuReady" to s.ready,
+                        "shizukuRunning" to s.running,
+                        "shizukuGranted" to s.granted,
                         "shizukuDetail" to s.detail,
                         "wireless" to w.phase.name.lowercase(),
                         "wirelessReady" to w.ready,
                         "wirelessDetail" to w.detail,
                         "source" to r.source.name.lowercase(),
                         "routerNote" to r.note,
+                        "shizukuText" to s.describe(),
                         "display" to vd.toMap(),
                         "accessibility" to MiniPhoneA11yState.connected,
                     ),
@@ -73,6 +86,38 @@ class VirtualDisplayBridge(
             "open_shizuku" -> result.success(mapOf("ok" to shizuku.openShizukuApp()))
 
             // ---------- 无线调试配对（B 路线） ----------
+            // 配对会话：先放通知栏输入框，再后台找端口/自动读码
+            "begin_pairing" -> {
+                val port = call.argument<Int>("port")
+                pairing.start()
+                if (port != null) PairingNotifier.showInput(context, port)
+                result.success(
+                    mapOf(
+                        "ok" to true,
+                        "autoRead" to PairingCodeReader(context).available(),
+                        "note" to if (PairingCodeReader(context).available()) {
+                            "已开始配对：我会直接读系统设置上的 6 位码并自动配对；读不到就下拉通知栏手动填"
+                        } else {
+                            "已开始配对：请下拉通知栏，在「输入配对码」里填 6 位码（不用关掉设置里的对话框）"
+                        },
+                    ),
+                )
+            }
+            // 直接打开无线调试页面，省得用户自己翻
+            "open_wireless_settings" -> {
+                val intent = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+                } else {
+                    android.content.Intent(android.provider.Settings.ACTION_SETTINGS)
+                }.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                val ok = runCatching { context.startActivity(intent) }.isSuccess
+                result.success(if (ok) mapOf("ok" to true) else mapOf("ok" to false, "error" to "cannot_open"))
+            }
+            "end_pairing" -> {
+                pairing.stop()
+                PairingNotifier.cancel(context)
+                result.success(mapOf("ok" to true))
+            }
             "pair_wireless" -> {
                 val code = call.argument<String>("code").orEmpty().trim()
                 val port = call.argument<Int>("port")

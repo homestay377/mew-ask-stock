@@ -70,6 +70,11 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/mini_phone_accessibility" />
         </service>
+        <!-- 配对码通知栏输入框的落点：收到 6 位码后开始配对 -->
+        <receiver
+            android:name=".pairing.PairingCodeReceiver"
+            android:exported="false" />
+
         <!-- Shizuku：声明 UserService provider，Shizuku 通过它启动 shell 身份的服务 -->
         <provider
             android:name="rikka.shizuku.ShizukuProvider"

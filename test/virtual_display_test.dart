@@ -66,6 +66,27 @@ void main() {
       expect(s.describe(), contains('createVirtualDisplay rejected'));
     });
 
+    test('Shizuku：服务在跑但没授权，和没在运行，分别说清', () {
+      final notRunning = VirtualDisplayStatus.fromMap({
+        'shizuku': 'not_running',
+        'shizukuRunning': false,
+        'shizukuGranted': false,
+        'shizukuText': 'Shizuku 服务没在运行（打开 Shizuku 点「启动服务」）',
+      });
+      final noPerm = VirtualDisplayStatus.fromMap({
+        'shizuku': 'need_permission',
+        'shizukuRunning': true,
+        'shizukuGranted': false,
+        'shizukuText': '还没给问股授权（在 Shizuku 的应用管理里点允许）',
+      });
+      expect(notRunning.shizukuRunning, isFalse);
+      expect(noPerm.shizukuRunning, isTrue);
+      expect(noPerm.shizukuGranted, isFalse);
+      expect(notRunning.describe(), contains('没在运行'));
+      expect(noPerm.describe(), contains('授权'));
+      expect(notRunning.describe(), isNot(noPerm.describe()));
+    });
+
     test('无线调试的失败原因会带出来', () {
       final s = VirtualDisplayStatus.fromMap({
         'shizuku': 'not_running',

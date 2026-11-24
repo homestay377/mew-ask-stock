@@ -39,6 +39,17 @@ class VirtualDisplayChannel {
   Future<Map<String, dynamic>> pairWireless(String code, {int? port}) =>
       _call('pair_wireless', args: {'code': code, 'port': ?port}, timeout: const Duration(seconds: 30));
 
+  /// 开始一次配对：会**先把带输入框的通知放进通知栏**，
+  /// 同时（无障碍开着时）自动读系统设置上的 6 位码。
+  /// 用户不需要离开那个配对对话框。
+  Future<Map<String, dynamic>> beginPairing({int? port}) =>
+      _call('begin_pairing', args: {'port': ?port}, timeout: const Duration(seconds: 15));
+
+  Future<Map<String, dynamic>> endPairing() => _call('end_pairing');
+
+  /// 打开系统的开发者选项页（无线调试在它下面）。
+  Future<Map<String, dynamic>> openWirelessSettings() => _call('open_wireless_settings');
+
   /// 配对之后拉起 shell 身份助手（B 路线第二步）。成功后再 ensureDisplay 就能建屏。
   Future<Map<String, dynamic>> startWireless() => _call('start_wireless', timeout: const Duration(seconds: 40));
 
@@ -101,6 +112,9 @@ class VirtualDisplayStatus {
     required this.shizuku,
     required this.shizukuReady,
     required this.shizukuDetail,
+    this.shizukuRunning = false,
+    this.shizukuGranted = false,
+    this.shizukuText,
     this.wireless = 'not_paired',
     this.wirelessReady = false,
     this.wirelessDetail,
@@ -116,6 +130,13 @@ class VirtualDisplayStatus {
   final String shizuku;
   final bool shizukuReady;
   final String? shizukuDetail;
+
+  /// 服务在不在跑、授没授权——分开报，避免把"服务没起来"说成"没授权"。
+  final bool shizukuRunning;
+  final bool shizukuGranted;
+
+  /// 原生给的一句话（准确说出缺哪一步），有就用它。
+  final String? shizukuText;
 
   /// 无线调试助手的状态：no_key / not_paired / pairing / connecting / ready / failed
   final String wireless;
@@ -148,7 +169,10 @@ class VirtualDisplayStatus {
     return VirtualDisplayStatus(
       shizuku: '${m['shizuku'] ?? 'unknown'}',
       shizukuReady: m['shizukuReady'] == true,
+      shizukuRunning: m['shizukuRunning'] == true,
+      shizukuGranted: m['shizukuGranted'] == true,
       shizukuDetail: m['shizukuDetail']?.toString(),
+      shizukuText: m['shizukuText']?.toString(),
       wireless: '${m['wireless'] ?? 'not_paired'}',
       wirelessReady: m['wirelessReady'] == true,
       wirelessDetail: m['wirelessDetail']?.toString(),
@@ -170,6 +194,11 @@ class VirtualDisplayStatus {
     if (shizukuReady || wirelessReady) {
       return '服务已就绪（${source == 'wireless' ? "无线调试助手" : "Shizuku"}），但虚拟屏没建起来'
           '${displayDetail == null ? "" : "：$displayDetail"}';
+    }
+    if (shizukuText != null && shizukuText!.isNotEmpty) {
+      // 原生把「服务没跑」和「没授权」分开了，直接用它的说法
+      final w = wirelessReady || wireless == 'ready' ? '；无线调试：已就绪' : '';
+      return '$shizukuText$w';
     }
     switch (shizuku) {
       case 'unsupported':

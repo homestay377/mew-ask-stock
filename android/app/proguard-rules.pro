@@ -28,3 +28,6 @@
 # 无线调试助手：app_process 按全类名启动，不能被混淆/删除
 -keep class io.github.homestay377.mewaskstock.shell.ShellServiceMain { *; }
 -keep class io.github.homestay377.mewaskstock.adb.** { *; }
+
+# 配对通知的广播接收器（系统按清单实例化）
+-keep class io.github.homestay377.mewaskstock.pairing.PairingCodeReceiver { *; }
