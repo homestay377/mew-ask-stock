@@ -26,6 +26,7 @@ import '../tools/app_tools.dart';
 import '../tools/http_tool.dart';
 import '../tools/local_tools.dart';
 import '../tools/phone_tools.dart';
+import '../tools/virtual_display_tools.dart';
 import '../tools/mcp.dart';
 import '../tools/stock_tools.dart';
 import '../tools/tool.dart';
@@ -293,8 +294,10 @@ class ChatController extends ChangeNotifier {
       if (a.enableMemory) ...buildMemoryTools(db, assistantId: a.useGlobalMemory ? null : a.id),
       // 股票分析：数据由 App 自己直取，不依赖任何界面状态。
       ...buildStockTools(enabled: a.enableStockTools),
-      // 手机操控：读屏 + 点击 + 输入，走无障碍服务；需要用户在系统设置里打开。
+      // 手机操控（无障碍，操作主屏）：读屏 + 点击 + 输入。
       ...buildPhoneTools(enabled: a.enablePhoneControl),
+      // 虚拟屏（Shizuku / 无线调试）：在后台看不见的屏上开别的 App，不打断用户。
+      ...buildVirtualDisplayTools(enabled: a.enableVirtualDisplay),
       // 基础执行能力：出网 + 受控文件读写。主智能体与子智能体共用同一套。
       buildHttpTool(),
       ...buildWorkspaceTools(),

@@ -310,6 +310,7 @@ class Assistant {
     this.enableWebSearch = false,
     this.enableStockTools = false,
     this.enablePhoneControl = false,
+    this.enableVirtualDisplay = false,
     this.localTools = const {LocalTool.timeInfo},
     this.mcpServerIds = const {},
     this.lorebookIds = const {},
@@ -352,6 +353,9 @@ class Assistant {
 
   /// 是否开放手机操控工具（读屏 / 点击 / 输入，需要无障碍服务）。
   final bool enablePhoneControl;
+
+  /// 是否开放虚拟屏工具（用 Shizuku/无线调试拿到的 shell 身份，在后台屏上开 App）。
+  final bool enableVirtualDisplay;
   final Set<LocalTool> localTools;
   final Set<String> mcpServerIds;
   final Set<String> lorebookIds;
@@ -391,6 +395,7 @@ class Assistant {
     bool? enableWebSearch,
     bool? enableStockTools,
     bool? enablePhoneControl,
+    bool? enableVirtualDisplay,
     Set<LocalTool>? localTools,
     Set<String>? mcpServerIds,
     Set<String>? lorebookIds,
@@ -425,6 +430,7 @@ class Assistant {
     enableWebSearch: enableWebSearch ?? this.enableWebSearch,
     enableStockTools: enableStockTools ?? this.enableStockTools,
     enablePhoneControl: enablePhoneControl ?? this.enablePhoneControl,
+    enableVirtualDisplay: enableVirtualDisplay ?? this.enableVirtualDisplay,
     localTools: localTools ?? this.localTools,
     mcpServerIds: mcpServerIds ?? this.mcpServerIds,
     lorebookIds: lorebookIds ?? this.lorebookIds,
@@ -460,6 +466,7 @@ class Assistant {
     enableWebSearch: asBool(j['enableWebSearch']),
     enableStockTools: asBool(j['enableStockTools']),
     enablePhoneControl: asBool(j['enablePhoneControl']),
+    enableVirtualDisplay: asBool(j['enableVirtualDisplay']),
     localTools: j['localTools'] == null ? {LocalTool.timeInfo} : enumSet(LocalTool.values, j['localTools']),
     mcpServerIds: asList(j['mcpServerIds']).map((e) => e.toString()).toSet(),
     lorebookIds: asList(j['lorebookIds']).map((e) => e.toString()).toSet(),
@@ -495,6 +502,7 @@ class Assistant {
     'enableWebSearch': enableWebSearch,
     'enableStockTools': enableStockTools,
     'enablePhoneControl': enablePhoneControl,
+    'enableVirtualDisplay': enableVirtualDisplay,
     'localTools': localTools.map((e) => e.name).toList(),
     'mcpServerIds': mcpServerIds.toList(),
     'lorebookIds': lorebookIds.toList(),

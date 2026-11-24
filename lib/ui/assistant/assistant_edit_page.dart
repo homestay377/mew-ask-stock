@@ -8,6 +8,7 @@ import '../../core/i18n.dart';
 import '../../data/assistant.dart';
 import '../../state/settings_store.dart';
 import '../../tools/mini_phone_channel.dart';
+import '../../tools/virtual_display_channel.dart';
 import '../chat/composer.dart';
 import '../chat/model_picker.dart';
 import '../widgets/common.dart';
@@ -513,6 +514,24 @@ class _AssistantEditPageState extends State<AssistantEditPage> with SingleTicker
           index: 1,
           title: t('手机与设备', 'Phone & device'),
           children: [
+            SwitchListTile(
+              secondary: const IconBadge(Icons.layers_rounded),
+              title: Text(t('虚拟屏', 'Virtual display')),
+              subtitle: Text(
+                t(
+                  '后台开 App 读行情，不占用你的屏幕（需 Shizuku 或无线调试）',
+                  'Runs apps on a hidden display (needs Shizuku or wireless debugging)',
+                ),
+              ),
+              value: _a.enableVirtualDisplay,
+              onChanged: (v) async {
+                _save(_a.copyWith(enableVirtualDisplay: v));
+                if (v) {
+                  final st = await VirtualDisplayChannel().status();
+                  if (!st.shizukuReady) await VirtualDisplayChannel().openShizuku();
+                }
+              },
+            ),
             SwitchListTile(
               secondary: const IconBadge(Icons.touch_app_rounded),
               title: Text(t('手机操控', 'Phone control')),

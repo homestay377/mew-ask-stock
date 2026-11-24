@@ -17,6 +17,14 @@
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
+    <!--
+      虚拟屏：靠 Shizuku / 无线调试拿到的 shell 身份建 DisplayManager 虚拟屏。
+      普通 App 没有这个权限，所以先声明 Shizuku 的 provider 与权限用于绑定 UserService。
+    -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
     <application
         android:label="mew问股"
         android:name="${applicationName}"
@@ -62,6 +70,15 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/mini_phone_accessibility" />
         </service>
+        <!-- Shizuku：声明 UserService provider，Shizuku 通过它启动 shell 身份的服务 -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

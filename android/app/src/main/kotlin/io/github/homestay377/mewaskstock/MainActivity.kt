@@ -4,10 +4,17 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import io.github.homestay377.mewaskstock.miniphone.MiniPhoneBridge
+import io.github.homestay377.mewaskstock.shell.ShizukuChannel
+import io.github.homestay377.mewaskstock.shell.VirtualDisplayBridge
 
 class MainActivity : FlutterActivity() {
+
+    /** Shizuku 通道整个 App 一份：watch 一次，所有页面共用。 */
+    private var shizuku: ShizukuChannel? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "io.github.homestay377.mewaskstock/chat_generation")
             .setMethodCallHandler { call, result ->
                 val conversationId = call.argument<String>("conversationId")
@@ -29,8 +36,19 @@ class MainActivity : FlutterActivity() {
                     result.error("background_service", error.message, null)
                 }
             }
-        // 手机操控：AI 读屏 / 点击 / 输入（需要用户在系统里打开无障碍服务）
+
+        // 手机操控（无障碍，操作主屏）
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MiniPhoneBridge.CHANNEL)
             .setMethodCallHandler(MiniPhoneBridge(applicationContext))
+
+        // 虚拟屏（Shizuku / 无线调试拿到的 shell 身份，App 在后台屏上跑）
+        val sh = shizuku ?: ShizukuChannel(applicationContext).also { shizuku = it }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VirtualDisplayBridge.CHANNEL)
+            .setMethodCallHandler(VirtualDisplayBridge(applicationContext, sh))
+    }
+
+    override fun onDestroy() {
+        shizuku?.unwatch()
+        super.onDestroy()
     }
 }

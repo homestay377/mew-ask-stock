@@ -61,16 +61,25 @@ class MiniPhoneAccessibility : AccessibilityService() {
 
     // ---------- 读屏 ----------
 
-    fun windows(): List<AccessibilityWindowInfo> {
+    /** 主屏的窗口（默认）。 */
+    fun windows(): List<AccessibilityWindowInfo> = windowsOn(Display.DEFAULT_DISPLAY)
+
+    /**
+     * 指定屏的窗口。虚拟屏上的 App 也能读——这正是"在后台屏上操作 App"的关键：
+     * 树里有文字、有 ref，比截图猜准得多。
+     */
+    fun windowsOn(displayId: Int): List<AccessibilityWindowInfo> {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            return windowsOnAllDisplays[Display.DEFAULT_DISPLAY].orEmpty()
+            return windowsOnAllDisplays[displayId].orEmpty()
         }
+        // 安卓 11 之前只有主屏那一份
+        if (displayId != Display.DEFAULT_DISPLAY) return emptyList()
         @Suppress("DEPRECATION")
         return windows.orEmpty()
     }
 
-    fun topPackage(): String? {
-        val apps = windows().filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+    fun topPackage(displayId: Int = Display.DEFAULT_DISPLAY): String? {
+        val apps = windowsOn(displayId).filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
         val active = apps.firstOrNull { it.isActive } ?: apps.firstOrNull()
         return active?.root?.packageName?.toString()
     }
@@ -81,12 +90,12 @@ class MiniPhoneAccessibility : AccessibilityService() {
      * ref（`@e3`）按遍历顺序编号：同一次读屏内稳定，下一次重新编号。
      * 所以模型拿到 ref 要尽快用；跨轮次时靠 [clickRef] 的坐标兜底。
      */
-    fun snapshot(fullResourceIds: Boolean = false): MiniScreen {
+    fun snapshot(fullResourceIds: Boolean = false, displayId: Int = Display.DEFAULT_DISPLAY): MiniScreen {
         val elements = ArrayList<MiniElement>()
         val windowsOut = ArrayList<MiniWindow>()
         var counter = 0
 
-        for (w in windows()) {
+        for (w in windowsOn(displayId)) {
             val root = w.root ?: continue
             val nodes = ArrayList<MiniNode>()
 
@@ -136,7 +145,7 @@ class MiniPhoneAccessibility : AccessibilityService() {
 
         val dm = resources.displayMetrics
         return MiniScreen(
-            packageName = topPackage(),
+            packageName = topPackage(displayId),
             width = dm.widthPixels,
             height = dm.heightPixels,
             elements = elements,
@@ -144,7 +153,8 @@ class MiniPhoneAccessibility : AccessibilityService() {
         )
     }
 
-    private fun elementByRef(ref: String): MiniElement? = snapshot(fullResourceIds = true).elements.firstOrNull { it.ref == ref }
+    private fun elementByRef(ref: String, displayId: Int = Display.DEFAULT_DISPLAY): MiniElement? =
+        snapshot(fullResourceIds = true, displayId = displayId).elements.firstOrNull { it.ref == ref }
 
     /** 点 ref：先找可点击的祖先节点；节点不可点时退回按中心坐标点。 */
     fun clickRef(ref: String): Boolean {
@@ -179,8 +189,8 @@ class MiniPhoneAccessibility : AccessibilityService() {
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
     }
 
-    private fun nodeAt(x: Int, y: Int): AccessibilityNodeInfo? {
-        for (w in windows()) {
+    private fun nodeAt(x: Int, y: Int, displayId: Int = Display.DEFAULT_DISPLAY): AccessibilityNodeInfo? {
+        for (w in windowsOn(displayId)) {
             val root = w.root ?: continue
             findAt(root, x, y, 0)?.let { return it }
         }

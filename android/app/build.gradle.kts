@@ -68,6 +68,10 @@ android {
         }
     }
 
+    buildFeatures {
+        aidl = true
+    }
+
     packaging {
         jniLibs {
             // Smaller downloads; native libs are page-aligned and loaded from the APK.
@@ -84,6 +88,10 @@ kotlin {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    // Shizuku 官方 API：只在设备已装、启动并授权 Shizuku 时绑定本地 shell 服务，
+    // 用于创建虚拟屏（普通 App 没有这个权限）。见 docs/virtual-display.md
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 }
 
 flutter {

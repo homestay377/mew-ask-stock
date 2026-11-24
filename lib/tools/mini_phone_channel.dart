@@ -1,42 +1,42 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
 
-/// 手机操控通道的原生实现封装。
+import 'mini_phone_channel.dart';
+
+/// 无障碍通道：读屏 / 点击 / 输入。
 ///
-/// Kotlin 侧见 `android/app/src/main/kotlin/io/github/homestay377/mewaskstock/miniphone/`。
-/// 所有方法返回 `Map`，必定带 `ok`；出错时带 `error`（机器码）与 `message`（给人看的一句话）。
-///
-/// 设计原则：**原生只提供原子动作，决策在 Dart 的模型循环里做**。
-/// 这里不做"点这里再点那里"的编排，也不缓存屏幕状态——每次 [observe] 都是一次真实读屏，
-/// 因为手机界面随时被用户动。
+/// 两种模式共用这一套方法，只差 `displayId`：
+/// - `displayId = -1`（默认）：操作**用户主屏**，界面会动，适合"就一下"；
+/// - `displayId = <虚拟屏号>`：操作**虚拟屏**，不动用户屏幕，读屏走
+///   `getWindowsOnAllDisplays[displayId]`。
 class MiniPhoneChannel {
-  MiniPhoneChannel({MethodChannel? channel}) : _channel = channel ?? const MethodChannel(channelName);
+  MiniPhoneChannel({MethodChannel? channel, this.defaultDisplayId = -1})
+    : _channel = channel ?? const MethodChannel(channelName);
 
   static const channelName = 'io.github.homestay377.mewaskstock/mini_phone';
 
   final MethodChannel _channel;
 
-  /// 无障碍服务是否已开启（用户需要在系统设置里手动开）。
+  /// 不显式传 displayId 时用哪块屏；-1 表示主屏。
+  final int defaultDisplayId;
+
   Future<bool> connected() async {
     if (!Platform.isAndroid) return false;
     final r = await _call('status');
     return r['connected'] == true;
   }
 
-  /// SDK 版本（低于 30 时截图、多窗口读屏不可用）。
   Future<int> sdk() async {
     if (!Platform.isAndroid) return 0;
     final r = await _call('status');
     return (r['sdk'] as num?)?.toInt() ?? 0;
   }
 
-  /// 读屏：返回 `{ok, package, size:[w,h], elements:[...], windows:[...]}`。
-  ///
-  /// `elements` 每条：`{ref, role, name, center:[x,y], bounds:[l,t,r,b], clickable, editable, scrollable, focused, checked, enabled}`。
-  /// `ref` 只在这一次读屏内有效，下一次读屏会重新编号。
-  Future<Map<String, dynamic>> observe({bool resourceIds = false}) => _call('observe', {'resourceIds': resourceIds});
+  Future<Map<String, dynamic>> observe({bool resourceIds = false, int? displayId}) => _call('observe', {
+    'resourceIds': resourceIds,
+    if ((displayId ?? defaultDisplayId) >= 0) 'displayId': displayId ?? defaultDisplayId,
+  });
 
   Future<Map<String, dynamic>> tapRef(String ref) => _call('tap_ref', {'ref': ref});
 
@@ -48,27 +48,28 @@ class MiniPhoneChannel {
   Future<Map<String, dynamic>> swipe(int x1, int y1, int x2, int y2, {int durationMs = 300}) =>
       _call('swipe', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2, 'durationMs': durationMs});
 
-  Future<Map<String, dynamic>> typeText(String ref, String text, {bool clear = false}) =>
+  Future<Map<String, dynamic>> typeText(String ref, String text, {bool clear = false, int? displayId}) =>
       _call('type_text', {'ref': ref, 'text': text, 'clear': clear});
 
   Future<Map<String, dynamic>> back() => _call('back');
-
   Future<Map<String, dynamic>> home() => _call('home');
-
   Future<Map<String, dynamic>> recents() => _call('recents');
+
+  /// 列出可启动的 App（名字 + 包名）。虚拟屏开 App 前先靠它把名字解析成包名。
+  Future<Map<String, dynamic>> listApps() => _call('list_apps');
+
+  /// 按名字/包名找 App；找不到时返回相近的候选（`suggest`）。
+  Future<Map<String, dynamic>> findApp(String query) => _call('find_app', {'query': query});
 
   Future<Map<String, dynamic>> openApp(String package) => _call('open_app', {'package': package});
 
   Future<Map<String, dynamic>> openUrl(String url, {String? package}) =>
       _call('open_url', {'url': url, 'package': package});
 
-  /// 跳系统的无障碍设置页，方便用户一步打开。
   Future<Map<String, dynamic>> openAccessibilitySettings() => _call('open_settings');
 
   Future<Map<String, dynamic>> _call(String method, [Map<String, dynamic>? args]) async {
-    if (!Platform.isAndroid) {
-      return {'ok': false, 'error': 'unsupported_platform'};
-    }
+    if (!Platform.isAndroid) return {'ok': false, 'error': 'unsupported_platform'};
     try {
       final r = await _channel.invokeMethod<dynamic>(method, args);
       if (r is Map) return r.map((k, v) => MapEntry('$k', v));
@@ -82,7 +83,6 @@ class MiniPhoneChannel {
 }
 
 /// 把一次读屏结果裁剪成"给模型看"的紧凑文本：省 token，又保留可点的位置。
-/// 只保留有名字或可交互的元素（原生已经过滤），再按名字去重相邻重复行（列表滚动时的重复条目）。
 ///
 /// 纯函数、不依赖 Flutter：既能在 App 里跑，也能单独用 dart 跑（`tool/mini_phone_render_check.dart`）。
 String renderScreenForModel(Map<Object?, Object?> screen, {int maxElements = 80}) {

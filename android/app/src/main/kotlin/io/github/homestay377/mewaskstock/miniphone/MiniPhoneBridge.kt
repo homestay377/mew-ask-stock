@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.github.homestay377.mewaskstock.shell.InstalledApps
 
 /**
  * 无障碍服务 ↔ Flutter 的桥。Dart 侧工具调用都落到这里。
@@ -55,6 +56,30 @@ class MiniPhoneBridge(private val context: Context) : MethodChannel.MethodCallHa
                 launchUrl(call.argument<String>("url").orEmpty(), call.argument<String>("package"), result)
                 return
             }
+            // 列 App / 找 App 只问 PackageManager，不需要无障碍（虚拟屏开 App 前用它把名字换成包名）
+            "list_apps" -> {
+                worker.execute {
+                    val apps = InstalledApps.list(context, forceReload = true).map { it.toMap() }
+                    main.post { result.success(mapOf("ok" to true, "apps" to apps)) }
+                }
+                return
+            }
+            "find_app" -> {
+                val query = call.argument<String>("query").orEmpty()
+                worker.execute {
+                    val exact = InstalledApps.find(context, query).map { it.toMap() }
+                    val suggest = if (exact.isEmpty()) InstalledApps.marketRelated(context).map { it.toMap() } else emptyList()
+                    main.post {
+                        val payload = mutableMapOf<String, Any?>("ok" to true, "apps" to exact)
+                        if (suggest.isNotEmpty()) {
+                            payload["suggest"] = suggest
+                            payload["detail"] = "没找到「$query」，下面是与行情相关的已装 App"
+                        }
+                        result.success(payload)
+                    }
+                }
+                return
+            }
         }
 
         val service = MiniPhoneAccessibility.instance
@@ -66,8 +91,10 @@ class MiniPhoneBridge(private val context: Context) : MethodChannel.MethodCallHa
         when (call.method) {
             "observe" -> {
                 val full = call.argument<Boolean>("resourceIds") ?: false
+                // displayId：默认主屏；传虚拟屏号就读那块屏上的界面
+                val displayId = call.argument<Int>("displayId") ?: android.view.Display.DEFAULT_DISPLAY
                 worker.execute {
-                    val snap = runCatching { service.snapshot(full) }.getOrNull()
+                    val snap = runCatching { service.snapshot(full, displayId) }.getOrNull()
                     main.post {
                         result.success(snap?.toMap() ?: mapOf("ok" to false, "error" to "read_failed"))
                     }
