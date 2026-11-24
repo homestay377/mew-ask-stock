@@ -66,8 +66,10 @@ class ShellDisplayService : IShellDisplay.Stub() {
                 lastError = null
                 return id
             } catch (t: Throwable) {
-                lastError = "$name: ${t.javaClass.simpleName}: ${t.message}"
-                Log.w(TAG, "createDisplay failed ($name, flags=0x${flags.toString(16)})", t)
+                // 反射调用抛的是 InvocationTargetException，真正的异常在 cause 里
+                val real = (t as? java.lang.reflect.InvocationTargetException)?.targetException ?: t
+                lastError = "$name: ${real.javaClass.name}: ${real.message ?: real.javaClass.simpleName}"
+                Log.w(TAG, "createDisplay failed ($name, flags=0x${flags.toString(16)})", real)
             }
         }
         return -1
@@ -94,13 +96,19 @@ class ShellDisplayService : IShellDisplay.Stub() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             return dm.createVirtualDisplay(NAME, width, height, dpi, surface, flags)
         }
-        val m = DisplayManager::class.java.methods.firstOrNull {
-            it.name == "createVirtualDisplay" && it.parameterTypes.size == 7
+        // 精确匹配签名：(String, int, int, int, Surface, int, String)
+        val want = arrayOf<Class<*>>(
+            String::class.java, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!,
+            Int::class.javaPrimitiveType!!, Surface::class.java, Int::class.javaPrimitiveType!!,
+            String::class.java,
+        )
+        val m = DisplayManager::class.java.declaredMethods.firstOrNull {
+            it.name == "createVirtualDisplay" && it.parameterTypes.contentEquals(want)
         } ?: run {
-            // 某些 ROM 改了签名；退回原重载（可能仍报包名错）
-            Log.w(TAG, "7-arg createVirtualDisplay not found, falling back")
+            Log.w(TAG, "no createVirtualDisplay(name,w,h,dpi,surface,flags,packageName) on this ROM")
             return dm.createVirtualDisplay(NAME, width, height, dpi, surface, flags)
         }
+        m.isAccessible = true
         return m.invoke(dm, NAME, width, height, dpi, surface, flags, OWNER_PACKAGE) as? VirtualDisplay
     }
 
