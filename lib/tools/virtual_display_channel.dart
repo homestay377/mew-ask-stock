@@ -106,6 +106,14 @@ class VirtualDisplayChannel {
 
   Future<Map<String, dynamic>> topTask() => _call('top_task');
 
+  /// 当前画面指纹（`hash:宽:高`），没有画面时空串。
+  /// 采样几十个像素算 FNV-1a，几毫秒——用来判断"这一下点下去界面变没变"，
+  /// 比动作后跑一遍 OCR（几百毫秒）便宜得多。
+  Future<String> fingerprint() async {
+    final r = await _call('frame_fingerprint');
+    return '${r['value'] ?? ''}';
+  }
+
   Future<Map<String, dynamic>> _call(
     String method, {
     Map<String, dynamic>? args,
