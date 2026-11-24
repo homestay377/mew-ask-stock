@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mewhub/data/assistant.dart';
+import 'package:mewhub/data/settings.dart';
 import 'package:mewhub/tools/virtual_display_channel.dart';
 
 void main() {
@@ -99,17 +100,44 @@ void main() {
   });
 
   group('Assistant.enableVirtualDisplay', () {
-    test('默认关闭，与手机操控互相独立', () {
+    test('默认开启，与手机操控互相独立', () {
       final a = Assistant(id: 'x', name: 'x');
-      expect(a.enableVirtualDisplay, isFalse);
+      expect(a.enableVirtualDisplay, isTrue, reason: '给过权限就该能自己用，不要求用户先去翻开关');
       expect(a.copyWith(enableVirtualDisplay: true).enablePhoneControl, isFalse);
-      expect(a.copyWith(enablePhoneControl: true).enableVirtualDisplay, isFalse);
+      expect(a.copyWith(enablePhoneControl: true).enablePhoneControl, isTrue);
+      expect(a.copyWith(enablePhoneControl: true).enableVirtualDisplay, isTrue);
     });
 
-    test('序列化往返保留取值', () {
-      final on = Assistant(id: 'x', name: 'x').copyWith(enableVirtualDisplay: true);
-      expect(Assistant.fromJson(on.toJson()).enableVirtualDisplay, isTrue);
-      expect(Assistant.fromJson(Assistant(id: 'y', name: 'y').toJson()).enableVirtualDisplay, isFalse);
+    test('用户可以关掉，关掉后序列化往返仍是关', () {
+      final off = Assistant(id: 'x', name: 'x').copyWith(enableVirtualDisplay: false);
+      expect(Assistant.fromJson(off.toJson()).enableVirtualDisplay, isFalse);
+    });
+
+    test('老配置没有这个键时按开启处理', () {
+      final json = Assistant(id: 'y', name: 'y').toJson()..remove('enableVirtualDisplay');
+      expect(Assistant.fromJson(json).enableVirtualDisplay, isTrue);
+    });
+  });
+
+  group('AppSettings 旧配置迁移', () {
+    test('老配置里显式 false 的助手会被打开一次，并写上 vdAutoOn', () {
+      final oldAssistant = Assistant(id: 'z', name: 'z').copyWith(enableVirtualDisplay: false).toJson();
+      final s = AppSettings.fromJson({
+        'assistants': [oldAssistant],
+        'currentAssistantId': 'z',
+      });
+      expect(s.assistants.single.enableVirtualDisplay, isTrue);
+      expect(s.toJson()['vdAutoOn'], isTrue);
+    });
+
+    test('迁移过的配置不再改动用户的选择', () {
+      final kept = Assistant(id: 'z', name: 'z').copyWith(enableVirtualDisplay: false).toJson();
+      final s = AppSettings.fromJson({
+        'assistants': [kept],
+        'currentAssistantId': 'z',
+        'vdAutoOn': true,
+      });
+      expect(s.assistants.single.enableVirtualDisplay, isFalse);
     });
   });
 }
