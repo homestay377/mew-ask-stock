@@ -279,6 +279,7 @@ class VirtualDisplayBridge(
                             "back" -> android.view.KeyEvent.KEYCODE_BACK
                             "enter" -> android.view.KeyEvent.KEYCODE_ENTER
                             "home" -> android.view.KeyEvent.KEYCODE_HOME
+                            "recents" -> android.view.KeyEvent.KEYCODE_APP_SWITCH
                             "del" -> android.view.KeyEvent.KEYCODE_DEL
                             else -> -1
                         }
