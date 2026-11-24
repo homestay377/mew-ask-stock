@@ -11,8 +11,6 @@ library;
 
 import 'dart:io';
 
-import 'dart:io';
-
 import '../core/paths.dart';
 import '../core/virtual_display_overlay_state.dart';
 import '../core/virtual_display_shot.dart';
