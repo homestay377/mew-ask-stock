@@ -145,7 +145,11 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
   /// 3. 都不行才说读不到。
   ///
   /// 所以"没开无障碍"不等于用不了——这正是 Mika 的做法。
-  Future<String> readScreen({int maxElements = kVirtualMaxElements, bool withImage = false}) async {
+  Future<String> readScreen({
+    int maxElements = kVirtualMaxElements,
+    bool withImage = false,
+    bool retryEmpty = false,
+  }) async {
     final off = await ensureReady();
     if (off != null) return off;
     final st = await d.vd.status();
@@ -158,12 +162,15 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
       return renderScreenForModel(snap, maxElements: maxElements);
     }
 
-    // 2. 本机 OCR。刚建屏或刚启动 App 时第一帧可能还没到，等一下重试一次。
-    for (var i = 0; i < 2; i++) {
-      final lines = await d.vd.ocr();
+    // 2. 本机 OCR。默认只认一次——每次动作都多花 600ms 重试，点起来就是"慢".
+    //    只有 vd_observe 这种"要看清"的调用才 retryEmpty。
+    var lines = await d.vd.ocr();
+    if (lines.isEmpty && retryEmpty) {
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      lines = await d.vd.ocr();
       if (lines.isNotEmpty) return renderOcrForModel(lines, maxElements: maxElements);
-      if (i == 0) await Future<void>.delayed(const Duration(milliseconds: 600));
     }
+    if (lines.isNotEmpty) return renderOcrForModel(lines, maxElements: maxElements);
 
     // 3. 都没有：说清可能的原因，别谎称"空屏"
     if (withImage) {
@@ -180,6 +187,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
 
   /// 动作之后自动再读一次屏，模型不用多花一轮确认。
   Future<String> actThenLook(String what, Future<Map<String, dynamic>> Function() act) async {
+    final sw = Stopwatch()..start();
     final r = await act();
     if (r['ok'] != true) {
       final err = r['error'] ?? 'unknown';
@@ -187,9 +195,14 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
       return '$what 没有成功：$err${detail == null ? '' : '（$detail）'}';
     }
     VirtualDisplayOverlayState.show();
-    // 界面切换需要时间；这里给一个很短的让路，避免读到动作前的帧
-    await Future<void>.delayed(const Duration(milliseconds: 350));
-    return '$what 已下发。\n\n${await readScreen()}';
+    // 界面切换需要时间；这里只留很短的一点，避免读到动作前的帧。
+    // 真正的等待交给读屏本身：OCR 那一步本来就要几百毫秒。
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+    final text = await readScreen();
+    sw.stop();
+    final ms = sw.elapsedMilliseconds;
+    final cost = ms < 1000 ? '$ms ms' : '${(ms / 1000).toStringAsFixed(1)} s';
+    return '$what 已下发（${cost}）。\n\n$text';
   }
 
   return [
@@ -318,7 +331,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
         final off = await ensureReady();
         if (off != null) return off;
         final n = (args['maxElements'] as num?)?.toInt() ?? kVirtualMaxElements;
-        return readScreen(maxElements: n, withImage: true);
+        return readScreen(maxElements: n, withImage: true, retryEmpty: true);
       },
     ),
     AppTool(
@@ -469,13 +482,15 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
           '① ref（无障碍树里的输入框，最稳，支持中文）；'
           '② x/y（先点这个位置让输入框拿到焦点，再送文字）；'
           '③ 都不给（直接打进当前焦点）。'
-          '②③ 走键盘事件、不需要无障碍，但只支持 ASCII（股票代码、英文、数字）；中文必须先开无障碍。',
+          '②③ 走键盘事件、不需要无障碍，但只支持 ASCII（股票代码、英文、数字）；中文必须先开无障碍。'
+          '**搜索框打完字通常要按回车才会真的搜**：这时传 enter=true，否则页面上什么都不会发生。',
       parameters: objectSchema(
         {
           'ref': strProp('输入框的 ref，如 @e12（要中文就必须走这个）'),
           'x': intProp('X 坐标：先点这里再输入'),
           'y': intProp('Y 坐标：先点这里再输入'),
           'text': strProp('要输入的文字'),
+          'enter': strProp('true = 打完按回车（搜索框必须）', enumValues: ['true', 'false']),
         },
         required: ['text'],
       ),
@@ -486,13 +501,23 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
         final text = '${args['text'] ?? ''}';
         if (text.isEmpty) return '需要 text。';
         final ref = '${args['ref'] ?? ''}'.trim();
+        final wantEnter = '${args['enter'] ?? ''}' == 'true';
+
+        /// 打完字之后统一收尾：要不要回车、等界面反应、读一次屏。
+        Future<String> afterTyping(String msg) async {
+          if (wantEnter) {
+            await Future<void>.delayed(const Duration(milliseconds: 250));
+            await d.vd.pressKey('enter');
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 400));
+          return '$msg${wantEnter ? '，已按回车' : ''}。\n\n${await readScreen()}';
+        }
 
         // ① 无障碍：能输入中文，先清空原内容
         if (ref.isNotEmpty) {
           final r = await d.phone.typeText(ref, text, displayId: st.displayId, clear: true);
           if (r['ok'] != true) return '输入失败：${r['error']}';
-          await Future<void>.delayed(const Duration(milliseconds: 300));
-          return '已输入。\n\n${await readScreen()}';
+          return afterTyping('已输入「$text」');
         }
 
         // ②③ 键盘事件：不需要无障碍，但只有 ASCII
@@ -504,10 +529,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
           await Future<void>.delayed(const Duration(milliseconds: 350));
         }
         final r = await d.vd.asciiText(text);
-        if (r['ok'] == true) {
-          await Future<void>.delayed(const Duration(milliseconds: 400));
-          return '已用键盘事件输入「$text」。\n\n${await readScreen()}';
-        }
+        if (r['ok'] == true) return afterTyping('已输入「$text」');
         if (r['error'] == 'partial') {
           return '只送进去了前面一部分。先 vd_observe 看看框里现在是什么——**别重发**，会重复输入。';
         }

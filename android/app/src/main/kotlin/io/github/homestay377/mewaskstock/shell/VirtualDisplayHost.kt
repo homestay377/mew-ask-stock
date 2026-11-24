@@ -160,6 +160,6 @@ class VirtualDisplayHost(private val context: Context) {
         const val TAG = "VirtualDisplayHost"
 
         /** OCR 输入短边：1080 足够认清行情文字，再大会明显变慢。 */
-        const val OCR_MAX_SHORT_SIDE = 1080
+        const val OCR_MAX_SHORT_SIDE = 800
     }
 }
