@@ -61,6 +61,11 @@ class VirtualDisplayChannel {
 
   Future<Map<String, dynamic>> releaseDisplay() => _call('release_display');
 
+  /// 用 shell 身份把本应用的无障碍服务写进 secure 设置，**不需要用户去系统里点**。
+  /// 对齐 Mika `RecoveryPermissions`：读整张列表 → 合并自己的 → 写回，不动别人的服务。
+  Future<Map<String, dynamic>> enableAccessibility() =>
+      _call('enable_accessibility', timeout: const Duration(seconds: 20));
+
   /// 在虚拟屏上打开一个包。失败原因见 [openError]。
   Future<Map<String, dynamic>> startApp(String packageName) =>
       _call('start_app', args: {'package': packageName}, timeout: const Duration(seconds: 30));
@@ -205,7 +210,7 @@ class VirtualDisplayStatus {
   String describe() {
     if (displayReady) {
       return '虚拟屏已就绪（display=$displayId，shellUid=${shizukuReady ? "2000" : "?"}）'
-          '${accessibility ? "，无障碍已连" : "，无障碍未连（读不到界面文字）"}';
+          '${accessibility ? "，无障碍已连" : "，无障碍未连（读屏走本机 OCR）"}';
     }
     if (shizukuReady || wirelessReady) {
       return '服务已就绪（${source == 'wireless' ? "无线调试助手" : "Shizuku"}），但虚拟屏没建起来'

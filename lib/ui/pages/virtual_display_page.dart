@@ -239,7 +239,7 @@ class _VirtualDisplayPageState extends State<VirtualDisplayPage> {
                     subtitle: Text(
                       st.accessibility
                           ? t('无障碍已连接，能读到界面文字', 'Accessibility connected')
-                          : t('无障碍未连接：读不到文字，只能截图', 'Accessibility off'),
+                          : t('无障碍未连接：AI 会自己开；开不了就读屏走本机 OCR', 'Accessibility off: the AI turns it on itself'),
                     ),
                   ),
                   ListTile(

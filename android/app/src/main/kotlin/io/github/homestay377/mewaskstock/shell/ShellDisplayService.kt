@@ -302,6 +302,19 @@ class ShellDisplayService : IShellDisplay.Stub() {
         return ASCII_DISPATCHED
     }
 
+    override fun execShell(command: String): String {
+        val script = "$command 2>&1; echo __exit=\$?"
+        return runCatching {
+            val p = ProcessBuilder("/system/bin/sh", "-c", script).redirectErrorStream(true).start()
+            val done = p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)
+            val out = p.inputStream.bufferedReader().use { it.readText() }
+            if (done) out.take(MAX_COMMAND_OUTPUT) else {
+                p.destroyForcibly()
+                "__error=timeout\n" + out.take(MAX_COMMAND_OUTPUT)
+            }
+        }.getOrElse { "__error=${it.javaClass.simpleName}: ${it.message}" }
+    }
+
     override fun identity(): IntArray = intArrayOf(Process.myUid(), Process.myPid())
 
     // ---------- 内部 ----------
@@ -383,6 +396,9 @@ class ShellDisplayService : IShellDisplay.Stub() {
         const val OWNER_PACKAGE = SHELL_PACKAGE
         const val USER_CURRENT = -2 // UserHandle.USER_CURRENT
         const val TAP_MS = 90L
+
+        /** execShell 输出的上限，防止一条命令把 binder 事务撑爆。 */
+        const val MAX_COMMAND_OUTPUT = 64 * 1024
         const val SWIPE_STEPS = 14
         const val IME_LOCAL = 0
         const val INJECT_ASYNC = 0

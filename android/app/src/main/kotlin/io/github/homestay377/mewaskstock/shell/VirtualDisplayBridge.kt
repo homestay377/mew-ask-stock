@@ -237,6 +237,17 @@ class VirtualDisplayBridge(
                             main.post { result.success(mapOf("ok" to ok)) }
                         }
                     }
+                    // 用 shell 身份把本应用的无障碍服务写进 secure 设置——用户不用自己去系统里点。
+                    // 逐条纪律（先读后合并、组件名两种写法、写完回读）都在 AccessibilityEnabler 里。
+                    "enable_accessibility" -> {
+                        worker.execute {
+                            val component = "${context.packageName}/.miniphone.MiniPhoneAccessibility"
+                            val r = AccessibilityEnabler.enable(component) { cmd ->
+                                runCatching { svc.execShell(cmd) }.getOrDefault("")
+                            }
+                            main.post { result.success(r.toMap()) }
+                        }
+                    }
                     "inject_ascii_text" -> {
                         val text = call.argument<String>("text").orEmpty()
                         if (text.isEmpty()) {

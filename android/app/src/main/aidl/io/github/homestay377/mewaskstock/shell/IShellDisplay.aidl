@@ -44,4 +44,13 @@ interface IShellDisplay {
      * 返回 0=未发送 1=已全部投递 2=可能只投递了前缀（别再换条路重发，会重复输入）
      */
     int injectAsciiText(int displayId, String text) = 10;
+
+    /**
+     * 以 shell 身份跑一条命令（`/system/bin/sh -c`）。
+     * 输出里最后一行是 `__exit=<code>`；超时会在开头写 `__error=timeout`。
+     *
+     * 用途：把本应用的无障碍服务写进 secure 设置——shell 身份才有 WRITE_SECURE_SETTINGS，
+     * 这样用户不用自己去系统设置里点开（做法对齐 Mika 的 RecoveryPermissions）。
+     */
+    String execShell(String command) = 11;
 }

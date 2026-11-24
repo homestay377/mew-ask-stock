@@ -56,6 +56,24 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     return r;
   }
 
+  var accessibilityTried = false;
+
+  /// 无障碍服务让读屏能拿到精确控件、也能输入中文。
+  ///
+  /// Mika 的做法是靠 shell 身份把它写进 secure 设置，用户从不需要去系统设置里点；
+  /// 这里照做：每进程只试一次，开不了就算了——读屏会退回本机 OCR（能点，不能打中文）。
+  Future<void> ensureAccessibilityOnce() async {
+    if (accessibilityTried) return;
+    accessibilityTried = true;
+    try {
+      final st = await d.vd.status();
+      if (st.accessibility) return;
+      await d.vd.enableAccessibility();
+    } catch (_) {
+      // 开不了不算错误：OCR 这条路还在，不打断当前动作
+    }
+  }
+
   /// 真正建屏的那一步：先尽量补上缺失的服务/授权，再调 ensure_display。
   /// 失败时只说「缺哪一步」，不说笼统的"没准备好"。
   Future<String?> buildOnce({required bool force}) async {
@@ -107,12 +125,15 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
   /// 不会建出两块屏、也不会互相把对方的 displayId 覆盖掉。
   Future<String?> ensureReady({bool force = false}) async {
     final st = await d.vd.status();
+    String? off;
     if (!force && st.usable) {
       displayId = st.displayId;
-      return null;
+    } else {
+      final inflight = building ??= buildOnce(force: force).whenComplete(() => building = null);
+      off = await inflight;
     }
-    final inflight = building ??= buildOnce(force: force).whenComplete(() => building = null);
-    return await inflight;
+    if (off == null) await ensureAccessibilityOnce();
+    return off;
   }
 
   /// 读虚拟屏。

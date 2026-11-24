@@ -53,6 +53,8 @@ class ShizukuShellUserService private constructor(dummy: Boolean) : IShellDispla
 
     override fun injectAsciiText(displayId: Int, text: String): Int = delegate.injectAsciiText(displayId, text)
 
+    override fun execShell(command: String): String = delegate.execShell(command)
+
     override fun identity(): IntArray = delegate.identity()
 
     override fun lastError(): String? = delegate.lastError()
