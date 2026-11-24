@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 /// 虚拟屏截图要不要交给模型。
 ///
 /// 同花顺这类界面，OCR 只能给出"一堆文字 + 坐标"，而多模态模型直接看图更准也更省 token：
