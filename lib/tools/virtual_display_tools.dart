@@ -598,12 +598,49 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     AppTool(
       name: 'vd_back',
       displayName: '虚拟屏返回',
-      description: '在虚拟屏上按返回键（不会影响你自己的屏幕）。',
-      parameters: objectSchema({}),
-      execute: (_) async {
+      description:
+          '在这块虚拟屏上按系统键：key=back（默认）返回上一页，key=home 回桌面。'
+          '**这块屏没有系统导航栏**（不像你手机那样有手势条/三大金刚），'
+          '所以页面里找不到"返回"按钮时，返回就靠它——不要因为看不到按钮就停下来。',
+      parameters: objectSchema({
+        'key': strProp('back / home', enumValues: ['back', 'home']),
+      }),
+      promptHint:
+          '虚拟屏上没有系统导航栏。要回上一页就调 vd_back（默认 back），不要去找页面上的返回按钮；'
+          '连续操作时可以连着 vd_back 退到你要的那一层。',
+      execute: (args) async {
         final off = await ensureReady();
         if (off != null) return off;
-        return actThenLook('按返回', () => d.vd.pressKey('back'));
+        final key = '${args['key'] ?? 'back'}';
+        final st = await d.vd.status();
+        final before = await d.vd.fingerprint();
+
+        final r = await d.vd.pressKey(key);
+        if (r['ok'] != true) return '按键没送进去：${r['error'] ?? r['message'] ?? 'unknown'}';
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        var after = await d.vd.fingerprint();
+        final changed = before.isNotEmpty && after.isNotEmpty && before != after;
+
+        if (key == 'back' && !changed) {
+          // 有些自绘页面不吃 BACK 键。退回手机上的那套"从左边缘往里划"手势返回。
+          final w = st.displayWidth;
+          final h = st.displayHeight;
+          if (w != null && h != null) {
+            final y = (h * 0.5).round();
+            await d.vd.swipe(2, y, (w * 0.35).round(), y, durationMs: 260);
+            await Future<void>.delayed(const Duration(milliseconds: 400));
+            after = await d.vd.fingerprint();
+            if (after.isNotEmpty && after != before) {
+              return '已返回（BACK 键没反应，改用了边缘手势）。\n\n${await readScreen()}';
+            }
+          }
+          return '返回没生效：BACK 键和边缘手势都没让界面变化。这块屏没有系统导航栏，'
+              '先 vd_observe 看看页面左上角有没有返回图标——有的话用 vd_tap text=「返回」点它。';
+        }
+
+        final text = await readScreen();
+        final note = changed ? '' : '（界面没有变化，可能已经在最外层页面）';
+        return '已按 $key$note。\n\n$text';
       },
     ),
   ];
