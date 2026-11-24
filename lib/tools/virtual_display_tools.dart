@@ -225,8 +225,13 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
         if (r['ok'] != true) {
           return '打开 $label（$pkg）失败：${r['error'] ?? ''} ${r['detail'] ?? ''}'.trim();
         }
-        await Future<void>.delayed(const Duration(milliseconds: 1200));
-        return '已在虚拟屏打开 $label（$pkg）。\n\n${await readScreen()}';
+        // 等界面真的有内容再回话：App 刚起时常是白屏/未挂载，这时读不到字。
+        var text = await readScreen();
+        for (var i = 0; i < 3 && _screenSeemsEmpty(text); i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 800));
+          text = await readScreen();
+        }
+        return '已在虚拟屏打开 $label（$pkg）。\n\n$text';
       },
     ),
     AppTool(
@@ -451,6 +456,10 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     ),
   ];
 }
+
+/// 读屏结果是不是「什么都没有」（白屏、未挂载、纯图页），
+/// 用来决定打开 App 后要不要再等一会儿重读。
+bool _screenSeemsEmpty(String text) => text.contains('没有可读内容') || text.contains('还没出画面') || text.contains('有画面但没有文字');
 
 /// 粗略判断是不是行情类 App（只用于默认过滤，不用于断定身份）。
 bool _looksLikeMarket(String label) {
