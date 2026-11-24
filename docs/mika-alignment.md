@@ -36,6 +36,7 @@ Mika 的路子是「**一个 shell 进程 + 一个富接口**」：`IMikaShell.a
 | 挪任务回屏 | `moveTask(taskId, displayId)`：`moveRootTaskToDisplay`，失败退 `am display move-stack` | ❌ 缺 | App 从后台拉起别的 App 时会落到主屏，Mika 靠这个挪回来 |
 | 发现任务掉到主屏 | `watchMainScreen(windowMs)` + `mainArrivals(since)` + `MainScreenSpill.decide`（6 秒窗口，排除用户自己点的） | ❌ 缺 | 这是"我在虚拟屏点的，怎么跑到用户眼前了"的根治手段 |
 | 读屏（树） | `AccessibilityService.windowsOnAllDisplays[displayId]`，剔除输入法/浮层，深度 80、去重、**坐标归一化 0..999** | ✅ 基本一致 | `MiniPhoneAccessibility.snapshot(displayId)` |
+| **无障碍自己开** | `RecoveryPermissions`：shell 身份 `settings put secure enabled_accessibility_services`（先读后合并、两种组件名写法、回读校验） | ✅ **本轮补上** | `AccessibilityEnabler` + `IShellDisplay.execShell`；用户不再需要去系统设置里点 |
 | 界面指纹 | FNV-1a 混 className/text/desc/bounds/states | ❌ 缺 | 用于"这一页变了没"、避免重复读 |
 | 读屏（OCR） | 中文 + 拉丁**两套模型并行**，坐标同样归一化 | ✅ 一致 | `ScreenOcr` |
 | 点击/滑动 | `injectInputEvent` + setDisplayId；按键用 WAIT_FOR_RESULT（派发失败要能察觉），触摸 ASYNC | ✅ 基本一致 | |
@@ -67,6 +68,12 @@ Mika 的路子是「**一个 shell 进程 + 一个富接口**」：`IMikaShell.a
   我们的定位是"看行情、点按钮"，碰用户账号和支付没有收益。
 - `watchMainScreen` 的完整版：成本高，先靠 moveTask 兜。
 
+## 3.5 工具默认开
+
+Mika 的能力是"装好就有"。我们原来 `enableVirtualDisplay` 默认 `false`，模型连工具都看不到，
+表现就是"AI 说它没有虚拟屏能力"。现在默认 `true`，并做了一次性迁移把老配置也打开
+（写 `vdAutoOn` 标记，之后不再动；用户在助手设置里关掉仍然有效）。
+
 ## 4. 已知的、我们故意不跟的地方
 
 - 接口瘦：不加 `setClipText` / `setAudioMuted` / `startAppInUser` 这类需要碰用户隐私的能力。
@@ -92,4 +99,4 @@ git diff a40f6a9..HEAD -- app/src/main/java/com/wangzan101/mika/cap/phone \
 
 | 日期 | Mika 基线 | 搬了什么 |
 |---|---|---|
-| 2026-11-24 | `a40f6a9` | 首版基线。补 `DisplayAwake` 保活、删本地 skeleton 屏、补 `injectAsciiText` 键盘注入 |
+| 2026-11-24 | `a40f6a9` | 首版基线。补 `DisplayAwake` 保活、删本地 skeleton 屏、补 `injectAsciiText` 键盘注入、无障碍自动开启 |
