@@ -31,6 +31,8 @@ class _VirtualDisplayOverlayState extends State<VirtualDisplayOverlay> {
   bool _expanded = false;
   Offset? _pos;
 
+  late final VirtualDisplayChannel _ch = widget.channel ?? VirtualDisplayChannel();
+
   /// 缩略图高度 = 宽度 × 画面高宽比；还没有画面时按常见手机比例估一个。
   double get _thumbH {
     final ratio = VirtualDisplayShot.aspect.value ?? (2772 / 1280);
@@ -117,13 +119,49 @@ class _VirtualDisplayOverlayState extends State<VirtualDisplayOverlay> {
                   style: const TextStyle(color: Colors.white, fontSize: 12),
                 ),
                 const SizedBox(height: 8),
-                VirtualDisplayPreview(channel: widget.channel, height: size.height * 0.62),
+                VirtualDisplayPreview(channel: widget.channel, height: size.height * 0.58),
+                const SizedBox(height: 10),
+                // 虚拟屏没有系统导航栏（小米手势导航下更没有），这里给一排自己的：
+                // 返回 / 桌面 / 最近任务，点一下就是往那块屏注入对应的系统键。
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _navButton(Icons.arrow_back_rounded, 'back', t('返回', 'Back')),
+                    const SizedBox(width: 18),
+                    _navButton(Icons.home_rounded, 'home', t('桌面', 'Home')),
+                    const SizedBox(width: 18),
+                    _navButton(Icons.crop_square_rounded, 'recents', t('最近任务', 'Recents')),
+                  ],
+                ),
               ],
             ),
           ),
         ),
         Positioned(top: 12, right: 12, child: SafeArea(child: _closeButton(onDark: true))),
       ],
+    );
+  }
+
+  Widget _navButton(IconData icon, String key, String label) {
+    return Semantics(
+      label: label,
+      button: true,
+      child: GestureDetector(
+        onTap: () async {
+          await _ch.pressKey(key);
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+        },
+        child: Container(
+          width: 46,
+          height: 46,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white.withValues(alpha: 0.16),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Icon(icon, color: Colors.white, size: 22),
+        ),
+      ),
     );
   }
 
