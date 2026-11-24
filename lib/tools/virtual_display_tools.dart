@@ -230,7 +230,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     sw.stop();
     final ms = sw.elapsedMilliseconds;
     final cost = ms < 1000 ? '$ms ms' : '${(ms / 1000).toStringAsFixed(1)} s';
-    return '$what 已下发（${cost}）。\n\n$text';
+    return '$what 已下发（$cost）。\n\n$text';
   }
 
   return [
