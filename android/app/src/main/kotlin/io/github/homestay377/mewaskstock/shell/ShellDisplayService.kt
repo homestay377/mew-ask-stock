@@ -68,7 +68,7 @@ class ShellDisplayService : IShellDisplay.Stub() {
             } catch (t: Throwable) {
                 // 反射调用抛的是 InvocationTargetException，真正的异常在 cause 里
                 val real = (t as? java.lang.reflect.InvocationTargetException)?.targetException ?: t
-                lastError = "$name: ${real.javaClass.name}: ${real.message ?: real.javaClass.simpleName}"
+                lastError = "$name: ${real.javaClass.name}: ${real.message ?: real.javaClass.simpleName}【${lastOwnerInfo ?: "?"}】"
                 Log.w(TAG, "createDisplay failed ($name, flags=0x${flags.toString(16)})", real)
             }
         }
@@ -109,7 +109,37 @@ class ShellDisplayService : IShellDisplay.Stub() {
             return dm.createVirtualDisplay(NAME, width, height, dpi, surface, flags)
         }
         m.isAccessible = true
-        return m.invoke(dm, NAME, width, height, dpi, surface, flags, OWNER_PACKAGE) as? VirtualDisplay
+        // 包名必须是**当前进程 uid 对应的包**。shizuku/无线调试给的身份不一定是 2000，
+        // 所以按真实 uid 反查，而不是写死 com.android.shell。
+        val uid = android.os.Process.myUid()
+        val owner = packageForUid(uid)
+        lastOwnerInfo = "uid=$uid pkg=$owner"
+        Log.i(TAG, "createVirtualDisplay owner=$lastOwnerInfo")
+        return m.invoke(dm, NAME, width, height, dpi, surface, flags, owner) as? VirtualDisplay
+    }
+
+    /**
+     * 用 uid 反查该 uid 对应的包名。
+     *
+     * 这张表里内建 uid 也有对应包：2000 = `com.android.shell`，0 = `android`（root），
+     * 1000 = `android`。普通 App 的 uid 走 PackageManager。
+     */
+    @SuppressLint("PrivateApi")
+    private fun packageForUid(uid: Int): String {
+        // 先用通用表查（能覆盖 1000/2000 等系统 uid）
+        val known = when (uid) {
+            0 -> "android"
+            1000 -> "android"
+            2000 -> "com.android.shell"
+            else -> null
+        }
+        if (known != null) return known
+        val viaPm = runCatching {
+            context()?.packageManager?.getPackagesForUid(uid)?.firstOrNull()
+        }.getOrNull()
+        if (!viaPm.isNullOrEmpty()) return viaPm
+        // 最后兜底：认成 App 自己的包（普通身份下正确）
+        return context()?.packageName ?: "com.android.shell"
     }
 
     /** 最近一次建屏失败的原因，App 侧会读出来给用户看。 */
@@ -117,6 +147,10 @@ class ShellDisplayService : IShellDisplay.Stub() {
 
     @Volatile
     private var lastError: String? = null
+
+    /** 最近一次建屏用的 owner 身份（uid + 包名），排查用。 */
+    @Volatile
+    private var lastOwnerInfo: String? = null
 
     override fun releaseDisplay(displayId: Int) {
         val vd = synchronized(lock) { displays.remove(displayId) }
