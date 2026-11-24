@@ -237,6 +237,11 @@ class VirtualDisplayBridge(
                             main.post { result.success(mapOf("ok" to ok)) }
                         }
                     }
+                    "frame_fingerprint" -> {
+                        // 帧在 App 进程里（ImageReader），所以指纹也在 App 侧算，不走 shell 服务
+                        val value = runCatching { VirtualDisplayManager.fingerprint() }.getOrDefault("")
+                        result.success(mapOf("ok" to true, "value" to value))
+                    }
                     // 用 shell 身份把本应用的无障碍服务写进 secure 设置——用户不用自己去系统里点。
                     // 逐条纪律（先读后合并、组件名两种写法、写完回读）都在 AccessibilityEnabler 里。
                     "enable_accessibility" -> {
