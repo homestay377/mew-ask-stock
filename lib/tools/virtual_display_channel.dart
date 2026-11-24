@@ -153,6 +153,8 @@ class VirtualDisplayStatus {
     required this.displayPhase,
     required this.displayDetail,
     required this.accessibility,
+    this.displayWidth,
+    this.displayHeight,
   });
 
   /// not_installed / not_running / need_permission / binding / ready / failed
@@ -182,6 +184,10 @@ class VirtualDisplayStatus {
 
   final bool accessibility;
 
+  /// 虚拟屏的像素尺寸；拿不到时为 null。坐标校验、以及告诉模型"按这个尺寸给坐标"都用它。
+  final int? displayWidth;
+  final int? displayHeight;
+
   factory VirtualDisplayStatus.unsupported({String? detail}) => VirtualDisplayStatus(
     shizuku: 'unsupported',
     shizukuReady: false,
@@ -195,6 +201,7 @@ class VirtualDisplayStatus {
 
   factory VirtualDisplayStatus.fromMap(Map<String, dynamic> m) {
     final d = (m['display'] as Map?)?.map((k, v) => MapEntry('$k', v)) ?? const <String, dynamic>{};
+    final sz = (m['displaySize'] as List?)?.map((e) => (e as num).toInt()).toList() ?? const <int>[];
     return VirtualDisplayStatus(
       shizuku: '${m['shizuku'] ?? 'unknown'}',
       shizukuReady: m['shizukuReady'] == true,
@@ -211,6 +218,8 @@ class VirtualDisplayStatus {
       displayPhase: '${d['phase'] ?? 'idle'}',
       displayDetail: d['detail']?.toString(),
       accessibility: m['accessibility'] == true,
+      displayWidth: sz.isNotEmpty ? sz[0] : null,
+      displayHeight: sz.length > 1 ? sz[1] : null,
     );
   }
 
