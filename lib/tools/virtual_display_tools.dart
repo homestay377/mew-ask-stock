@@ -66,7 +66,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     }
 
     // 2) 建屏。重复调用是安全的：native 侧已经 ready 就直接返回原屏。
-    final r = await d.vd.ensureDisplay();
+    final r = await ensureDisplayWithRetry();
     if (r['ok'] == true) {
       displayId = (r['displayId'] as num?)?.toInt() ?? -1;
       // 第一帧会晚半拍，稍等一下，免得下一句就读到空屏
@@ -83,6 +83,22 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     }
     final why = detail.isEmpty ? after.describe() : '${after.describe()}（$detail）';
     return force ? '重建虚拟屏失败：$why' : '虚拟屏没建起来：$why';
+  }
+
+  /// 调一次 `ensure_display`，并对「身份还在绑」这种瞬时状态重试。
+  ///
+  /// Shizuku 刚授权、刚重启服务时 binder 还没绑上，native 会返回 `shell_unavailable`。
+  /// 这时不该告诉用户「没准备好」——它只是还在连。最多等约 6 秒，每次重试都顺手
+  /// 触发一次绑定（`refresh` 内部会 bind）。
+  Future<Map<String, dynamic>> ensureDisplayWithRetry() async {
+    var r = await d.vd.ensureDisplay();
+    for (var i = 0; i < 7 && r['ok'] != true; i++) {
+      if ('${r['error'] ?? ''}' != 'shell_unavailable') break;
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      await d.vd.refresh();
+      r = await d.vd.ensureDisplay();
+    }
+    return r;
   }
 
   /// 就绪返回 `null`，否则返回「缺哪一步」的一句话。
