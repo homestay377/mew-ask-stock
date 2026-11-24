@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:mewhub/core/i18n.dart';
 import 'package:mewhub/core/virtual_display_overlay_state.dart';
+import 'package:mewhub/core/virtual_display_shot.dart';
 import 'package:mewhub/tools/virtual_display_channel.dart';
 import 'package:mewhub/ui/widgets/virtual_display_preview.dart';
 
@@ -11,6 +12,9 @@ import 'package:mewhub/ui/widgets/virtual_display_preview.dart';
 /// - **可以拖到任意位置**（拖动不会误触放大）；
 /// - **点一下放大**，放大时背景变暗、点画面以外任何地方就缩回去；
 /// - 右上角 × 直接关掉（关掉后不会自己再冒出来，除非 AI 又动那块屏）。
+///
+/// 尺寸**按真实画面的宽高比**算（[VirtualDisplayShot.aspect]），
+/// 不用固定的 9:16——手机是 9:19.5 左右，写死比例会把上下裁掉一截。
 class VirtualDisplayOverlay extends StatefulWidget {
   const VirtualDisplayOverlay({super.key, this.channel});
 
@@ -21,19 +25,25 @@ class VirtualDisplayOverlay extends StatefulWidget {
 }
 
 class _VirtualDisplayOverlayState extends State<VirtualDisplayOverlay> {
-  static const double _thumbW = 108;
-  static const double _thumbH = 192;
+  static const double _thumbW = 104;
   static const double _edge = 10;
 
   bool _expanded = false;
   Offset? _pos;
 
+  /// 缩略图高度 = 宽度 × 画面高宽比；还没有画面时按常见手机比例估一个。
+  double get _thumbH {
+    final ratio = VirtualDisplayShot.aspect.value ?? (2772 / 1280);
+    return (_thumbW * ratio).clamp(140.0, 320.0).toDouble();
+  }
+
   void _drag(Size size, Offset delta) {
     final cur = _pos ?? _defaultPos(size);
+    final h = _thumbH;
     setState(() {
       _pos = Offset(
         (cur.dx + delta.dx).clamp(_edge, size.width - _thumbW - _edge).toDouble(),
-        (cur.dy + delta.dy).clamp(_edge, size.height - _thumbH - _edge).toDouble(),
+        (cur.dy + delta.dy).clamp(_edge, size.height - h - _edge).toDouble(),
       );
     });
   }
@@ -47,18 +57,24 @@ class _VirtualDisplayOverlayState extends State<VirtualDisplayOverlay> {
       builder: (ctx, on, _) {
         if (!on) return const SizedBox.shrink();
         final size = MediaQuery.of(ctx).size;
-        return _expanded ? _expandedLayer(size) : _thumbLayer(size);
+        if (_expanded) return _expandedLayer(size);
+        // 画面比例一到就重排，免得缩略图停在旧尺寸上
+        return ValueListenableBuilder<double?>(
+          valueListenable: VirtualDisplayShot.aspect,
+          builder: (_, _, _) => _thumbLayer(size),
+        );
       },
     );
   }
 
   Widget _thumbLayer(Size size) {
+    final h = _thumbH;
     final pos = _pos ?? _defaultPos(size);
     return Stack(
       children: [
         Positioned(
           left: pos.dx.clamp(_edge, size.width - _thumbW - _edge).toDouble(),
-          top: pos.dy.clamp(_edge, size.height - _thumbH - _edge).toDouble(),
+          top: pos.dy.clamp(_edge, size.height - h - _edge).toDouble(),
           child: GestureDetector(
             onTap: () => setState(() => _expanded = true),
             onPanUpdate: (d) => _drag(size, d.delta),
@@ -69,13 +85,7 @@ class _VirtualDisplayOverlayState extends State<VirtualDisplayOverlay> {
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 14, offset: Offset(0, 4))],
                   ),
-                  child: VirtualDisplayPreview(
-                    channel: widget.channel,
-                    width: _thumbW,
-                    height: _thumbH,
-                    fit: BoxFit.cover,
-                    radius: 16,
-                  ),
+                  child: VirtualDisplayPreview(channel: widget.channel, width: _thumbW, fit: BoxFit.cover, radius: 16),
                 ),
                 Positioned(top: 2, right: 2, child: _closeButton()),
               ],
