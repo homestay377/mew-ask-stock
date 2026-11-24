@@ -74,6 +74,11 @@ class VirtualDisplayChannel {
   /// back / enter / home / del
   Future<Map<String, dynamic>> pressKey(String key) => _call('press_key', args: {'key': key});
 
+  /// 把文字当键盘事件打进这块屏的当前焦点：**不需要无障碍、不需要输入法**。
+  /// 只送可打印 ASCII（股票代码、英文、数字）；中文得靠无障碍 [MiniPhoneChannel.typeText]。
+  /// `ok=false, error=partial` 表示可能只打进去前缀——别再重发，会重复。
+  Future<Map<String, dynamic>> asciiText(String text) => _call('inject_ascii_text', args: {'text': text});
+
   /// 用**本机 OCR** 读虚拟屏上的文字，返回带坐标的行。
   ///
   /// 这条路**不需要无障碍**：画面经 ImageReader 进来，ML Kit 在本机识别，

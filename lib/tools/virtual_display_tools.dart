@@ -424,8 +424,21 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     AppTool(
       name: 'vd_type',
       displayName: '在虚拟屏输入',
-      description: '往虚拟屏的输入框写文字。传 ref 定位；不传则用坐标。',
-      parameters: objectSchema({'ref': strProp('输入框的 ref'), 'text': strProp('要输入的文字')}, required: ['text']),
+      description:
+          '往虚拟屏写文字，三种给法：'
+          '① ref（无障碍树里的输入框，最稳，支持中文）；'
+          '② x/y（先点这个位置让输入框拿到焦点，再送文字）；'
+          '③ 都不给（直接打进当前焦点）。'
+          '②③ 走键盘事件、不需要无障碍，但只支持 ASCII（股票代码、英文、数字）；中文必须先开无障碍。',
+      parameters: objectSchema(
+        {
+          'ref': strProp('输入框的 ref，如 @e12（要中文就必须走这个）'),
+          'x': intProp('X 坐标：先点这里再输入'),
+          'y': intProp('Y 坐标：先点这里再输入'),
+          'text': strProp('要输入的文字'),
+        },
+        required: ['text'],
+      ),
       execute: (args) async {
         final off = await ensureReady();
         if (off != null) return off;
@@ -433,14 +446,35 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
         final text = '${args['text'] ?? ''}';
         if (text.isEmpty) return '需要 text。';
         final ref = '${args['ref'] ?? ''}'.trim();
-        if (ref.isEmpty) {
-          return '输入需要 ref（输入框编号）：先 vd_observe 看有没有 [可输入] 的元素。'
-              '如果只读到 OCR 文字，说明无障碍没连——虚拟屏打字必须靠无障碍树定位输入框。';
+
+        // ① 无障碍：能输入中文，先清空原内容
+        if (ref.isNotEmpty) {
+          final r = await d.phone.typeText(ref, text, displayId: st.displayId, clear: true);
+          if (r['ok'] != true) return '输入失败：${r['error']}';
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+          return '已输入。\n\n${await readScreen()}';
         }
-        final r = await d.phone.typeText(ref, text, displayId: st.displayId, clear: true);
-        if (r['ok'] != true) return '输入失败：${r['error']}';
-        await Future<void>.delayed(const Duration(milliseconds: 300));
-        return '已输入。\n\n${await readScreen()}';
+
+        // ②③ 键盘事件：不需要无障碍，但只有 ASCII
+        final x = (args['x'] as num?)?.toInt();
+        final y = (args['y'] as num?)?.toInt();
+        if (x != null && y != null) {
+          final tapped = await d.vd.tap(x, y);
+          if (tapped['ok'] != true) return '点 ($x,$y) 没成功（${tapped['error'] ?? ''}），输入没做。';
+          await Future<void>.delayed(const Duration(milliseconds: 350));
+        }
+        final r = await d.vd.asciiText(text);
+        if (r['ok'] == true) {
+          await Future<void>.delayed(const Duration(milliseconds: 400));
+          return '已用键盘事件输入「$text」。\n\n${await readScreen()}';
+        }
+        if (r['error'] == 'partial') {
+          return '只送进去了前面一部分。先 vd_observe 看看框里现在是什么——**别重发**，会重复输入。';
+        }
+        final asciiOnly = text.runes.every((c) => c >= 0x20 && c <= 0x7e);
+        return asciiOnly
+            ? '键盘事件没送进去（${r['error'] ?? 'unknown'}）：先用 vd_tap 点一下输入框让它拿到焦点，再 vd_type。'
+            : '这段文字含非 ASCII 字符（中文等），键盘事件送不了；要在虚拟屏打中文，得先把无障碍服务连上。';
       },
     ),
     AppTool(

@@ -37,4 +37,11 @@ interface IShellDisplay {
 
     /** 上一次建屏失败的原因（success 后清空）；没失败过返回 null。 */
     String lastError() = 9;
+
+    /**
+     * 把可打印 ASCII 当键盘事件打进这块屏的当前焦点——不需要无障碍、不需要输入法。
+     * 中文打不了（要输入法），但股票代码、搜索词、英文够了。
+     * 返回 0=未发送 1=已全部投递 2=可能只投递了前缀（别再换条路重发，会重复输入）
+     */
+    int injectAsciiText(int displayId, String text) = 10;
 }

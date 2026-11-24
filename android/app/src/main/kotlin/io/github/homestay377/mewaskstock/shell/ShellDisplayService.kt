@@ -14,6 +14,7 @@ import android.util.Log
 import android.view.Display
 import android.view.InputDevice
 import android.view.InputEvent
+import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.Surface
@@ -282,6 +283,25 @@ class ShellDisplayService : IShellDisplay.Stub() {
         return ok || runCommand("input", "-d", displayId.toString(), "keyevent", keyCode.toString()) == 0
     }
 
+    override fun injectAsciiText(displayId: Int, text: String): Int {
+        if (displayId <= Display.DEFAULT_DISPLAY || !own(displayId)) return ASCII_NOT_SENT
+        val payload = text.filter { it.code in 0x20..0x7E }
+        if (payload.isEmpty()) {
+            Log.w(TAG, "injectAsciiText: nothing printable (中文需要输入法，这条路只送 ASCII)")
+            return ASCII_NOT_SENT
+        }
+        val events = runCatching {
+            KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(payload.toCharArray())
+        }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return ASCII_NOT_SENT
+        for (e in events) {
+            if (!own(displayId)) return ASCII_UNCONFIRMED
+            e.source = InputDevice.SOURCE_KEYBOARD
+            // 送到一半失败就停下：已经打进去的前缀不能换条路重发，否则会重复
+            if (!inject(e, displayId, waitForFinish = true)) return ASCII_UNCONFIRMED
+        }
+        return ASCII_DISPATCHED
+    }
+
     override fun identity(): IntArray = intArrayOf(Process.myUid(), Process.myPid())
 
     // ---------- 内部 ----------
@@ -368,6 +388,11 @@ class ShellDisplayService : IShellDisplay.Stub() {
         const val INJECT_ASYNC = 0
         const val INJECT_WAIT_FOR_RESULT = 1
         const val INJECT_WAIT_FOR_FINISH = 2
+
+        /** injectAsciiText 的返回码。 */
+        const val ASCII_NOT_SENT = 0
+        const val ASCII_DISPATCHED = 1
+        const val ASCII_UNCONFIRMED = 2
 
         const val START_OK = 0
         const val START_IN_USE_ON_MAIN = 1

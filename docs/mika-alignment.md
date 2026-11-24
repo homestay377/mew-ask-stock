@@ -40,7 +40,7 @@ Mika 的路子是「**一个 shell 进程 + 一个富接口**」：`IMikaShell.a
 | 读屏（OCR） | 中文 + 拉丁**两套模型并行**，坐标同样归一化 | ✅ 一致 | `ScreenOcr` |
 | 点击/滑动 | `injectInputEvent` + setDisplayId；按键用 WAIT_FOR_RESULT（派发失败要能察觉），触摸 ASYNC | ✅ 基本一致 | |
 | 手势笔画 | `injectStroke(displayId, xs, ys, times)`：按时间逐点注入 | ❌ 缺 | 长按、拖动这类需要多点时序 |
-| 输入文字 | 三条路：无障碍 ACTION_SET_TEXT / `injectAsciiText`（键盘事件）/ 剪贴板 + 粘贴 | 🟡 只有无障碍一条 | 没开无障碍就**打不了字**，这是最大体验缺口 |
+| 输入文字 | 三条路：无障碍 ACTION_SET_TEXT / `injectAsciiText`（键盘事件）/ 剪贴板 + 粘贴 | ✅ 两条 | 本轮补了 `injectAsciiText`（只送 ASCII）；中文仍必须走无障碍 |
 | 滚轮 | `WheelDriver` 用 ACTION_SCROLL 而不是模拟手指 | ❌ 缺 | 长列表更稳 |
 | 主屏不被抢 | `STEAL_TOP_FOCUS_DISABLED` + `MainScreenSpill` / `PipInput` | 🟡 只有前者 | |
 | 状态诊断 | `ScreenDiagnosis.classify` + Advice 文案 | ❌ 缺 | 我们只有 lastError / describe() |
@@ -50,8 +50,7 @@ Mika 的路子是「**一个 shell 进程 + 一个富接口**」：`IMikaShell.a
 **高**
 
 1. **保活**（已完成）。缺它的症状和"功能没做"完全一样：屏在、App 在、就是不动。
-2. **输入文字的第二条路**（`injectAsciiText` 或剪贴板+粘贴）。没开无障碍时现在只能点不能输入，
-   搜索框、代码框全部用不了。股票名/代码是 ASCII 为主，`injectAsciiText` 就够。
+2. ~~**输入文字的第二条路**~~（已完成）：`IShellDisplay.injectAsciiText` + `vd_type` 的 x/y/纯焦点三种给法。
 3. **`moveTask`**。App 从后台拉起别的页面（同花顺的行情详情、雪球的外链）会落到主屏，
    用户手机突然跳屏。补一个 moveTask + 启动后校验 topTask 就够了，不必上 `watchMainScreen`。
 
@@ -93,4 +92,4 @@ git diff a40f6a9..HEAD -- app/src/main/java/com/wangzan101/mika/cap/phone \
 
 | 日期 | Mika 基线 | 搬了什么 |
 |---|---|---|
-| 2026-11-24 | `a40f6a9` | 首版基线。补 `DisplayAwake` 保活、删本地 skeleton 屏 |
+| 2026-11-24 | `a40f6a9` | 首版基线。补 `DisplayAwake` 保活、删本地 skeleton 屏、补 `injectAsciiText` 键盘注入 |

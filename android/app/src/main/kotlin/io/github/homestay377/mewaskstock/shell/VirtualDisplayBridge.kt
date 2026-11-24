@@ -237,6 +237,25 @@ class VirtualDisplayBridge(
                             main.post { result.success(mapOf("ok" to ok)) }
                         }
                     }
+                    "inject_ascii_text" -> {
+                        val text = call.argument<String>("text").orEmpty()
+                        if (text.isEmpty()) {
+                            result.success(mapOf("ok" to false, "error" to "no_text"))
+                            return
+                        }
+                        worker.execute {
+                            val code = runCatching { svc.injectAsciiText(id, text) }.getOrDefault(0)
+                            main.post {
+                                result.success(
+                                    when (code) {
+                                        1 -> mapOf("ok" to true, "sent" to "all")
+                                        2 -> mapOf("ok" to false, "error" to "partial", "sent" to "partial")
+                                        else -> mapOf("ok" to false, "error" to "not_sent")
+                                    },
+                                )
+                            }
+                        }
+                    }
                     "press_key" -> {
                         val key = call.argument<String>("key").orEmpty()
                         val code = when (key) {
