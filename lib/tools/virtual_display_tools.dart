@@ -207,6 +207,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
   /// 动作之后自动再读一次屏，模型不用多花一轮确认。
   Future<String> actThenLook(String what, Future<Map<String, dynamic>> Function() act) async {
     final sw = Stopwatch()..start();
+    final before = await d.vd.fingerprint();
     final r = await act();
     if (r['ok'] != true) {
       final err = r['error'] ?? 'unknown';
@@ -217,18 +218,23 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     // 界面切换需要时间；这里只留很短的一点，避免读到动作前的帧。
     await Future<void>.delayed(const Duration(milliseconds: 180));
     final st = await d.vd.status();
+    final after = await d.vd.fingerprint();
+    // 指纹只回答一个问题：这一下点下去，界面到底变了没有。成本几毫秒。
+    final changed = before.isNotEmpty && after.isNotEmpty && before != after;
+    final changeNote = changed ? '界面已变化' : '界面看起来没变（可能没点中，或还在加载）';
+
     if (!st.accessibility) {
       // 无障碍没连时读屏只能走 OCR：每次动作后再读一遍要几百毫秒，点起来就很"卡"。
-      // 这里直接返回，让模型需要看的时候自己 vd_observe。
+      // 所以这里不读文字，但**要把"变没变"告诉模型**——否则它点一下就以为完事了。
       sw.stop();
-      return '$what 已下发（${sw.elapsedMilliseconds} ms）。'
-          '无障碍没连，读屏要走 OCR，所以这次没自动读；要看界面再 vd_observe。';
+      return '$what 已下发（${sw.elapsedMilliseconds} ms，$changeNote）。'
+          '无障碍没连，这次没读文字细节；要继续下一步就直接点/输入，需要看字再 vd_observe。';
     }
     final text = await readScreen();
     sw.stop();
     final ms = sw.elapsedMilliseconds;
     final cost = ms < 1000 ? '$ms ms' : '${(ms / 1000).toStringAsFixed(1)} s';
-    return '$what 已下发（$cost）。\n\n$text';
+    return '$what 已下发（$cost，$changeNote）。\n\n$text';
   }
 
   return [
@@ -426,6 +432,9 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
         'x': intProp('X 坐标（虚拟屏像素）'),
         'y': intProp('Y 坐标（虚拟屏像素）'),
       }),
+      promptHint:
+          '这是**连续操作**：点开搜索框 → 输入代码 → 回车 → 看结果，一步一步接着做，'
+          '直到用户要的最终状态出现再回话。不要点一下就停下来汇报进度。',
       execute: (args) async {
         final off = await ensureReady();
         if (off != null) return off;
