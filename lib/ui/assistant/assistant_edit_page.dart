@@ -7,6 +7,7 @@ import '../../core/attachments.dart';
 import '../../core/i18n.dart';
 import '../../data/assistant.dart';
 import '../../state/settings_store.dart';
+import '../../tools/mini_phone_channel.dart';
 import '../chat/composer.dart';
 import '../chat/model_picker.dart';
 import '../widgets/common.dart';
@@ -510,6 +511,25 @@ class _AssistantEditPageState extends State<AssistantEditPage> with SingleTicker
         ),
         SettingsGroup(
           index: 1,
+          title: t('手机与设备', 'Phone & device'),
+          children: [
+            SwitchListTile(
+              secondary: const IconBadge(Icons.touch_app_rounded),
+              title: Text(t('手机操控', 'Phone control')),
+              subtitle: Text(t('读屏、点击、输入（需开启无障碍服务）', 'Read the screen, tap and type (needs accessibility)')),
+              value: _a.enablePhoneControl,
+              onChanged: (v) async {
+                _save(_a.copyWith(enablePhoneControl: v));
+                if (v) {
+                  final ch = MiniPhoneChannel();
+                  if (!await ch.connected()) await ch.openAccessibilitySettings();
+                }
+              },
+            ),
+          ],
+        ),
+        SettingsGroup(
+          index: 2,
           title: t('本地工具', 'Local tools'),
           children: [
             for (final (tool, icon, title, subtitle) in [

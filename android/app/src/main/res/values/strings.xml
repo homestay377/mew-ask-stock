@@ -3,4 +3,7 @@
     <string name="chat_generation_channel">Chat generation</string>
     <string name="chat_generation_running">A reply is being generated</string>
     <string name="chat_generations_running">%1$d replies are being generated</string>
+    <!-- 手机操控（无障碍服务）在系统设置里显示的名字与说明 -->
+    <string name="mini_phone_service_label">问股操控</string>
+    <string name="mini_phone_service_description">让问股读取当前界面并替你点击、输入。只在你自己发起分析时使用；数据不离开手机。</string>
 </resources>

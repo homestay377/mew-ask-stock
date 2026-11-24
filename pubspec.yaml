@@ -2,7 +2,7 @@ name: mewhub
 description: "mew问股 - 多供应商 AI 聊天客户端，内置缠论与多级别股票分析。"
 publish_to: 'none'
 
-version: 1.9.4+10904
+version: 1.11.0+11100
 
 environment:
   sdk: ^3.13.0
