@@ -16,15 +16,25 @@ class VirtualDisplayPreview extends StatefulWidget {
     super.key,
     this.channel,
     this.intervalMs = 1200,
-    this.height = 360,
+    this.height,
+    this.width,
+    this.fit = BoxFit.contain,
+    this.radius = 12,
     this.enabled = true,
   });
 
   final VirtualDisplayChannel? channel;
   final int intervalMs;
 
-  /// 预览高度；`null` 表示撑满父级（放进 Expanded 时用）。宽度按手机比例算。
+  /// 高度；`null` 表示按父级撑满（放进 Expanded 时用），或只给 [width] 时按比例算。
   final double? height;
+
+  /// 宽度。给了宽高就直接铺满这个框（缩略图用，配 [BoxFit.cover]）。
+  final double? width;
+
+  /// 画面填充方式：大图 `contain`（不裁），缩略图 `cover`（不留黑边）。
+  final BoxFit fit;
+  final double radius;
   final bool enabled;
 
   @override
@@ -81,55 +91,31 @@ class _VirtualDisplayPreviewState extends State<VirtualDisplayPreview> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final body = Container(
-      decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(widget.radius),
+      ),
       clipBehavior: Clip.antiAlias,
       child: _png == null
           ? Center(
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(12),
                 child: Text(
                   _error ?? t('读取画面…', 'Loading frame…'),
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+                  style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 11),
                 ),
               ),
             )
-          : Image.memory(_png!, gaplessPlayback: true, fit: BoxFit.contain),
+          : Image.memory(_png!, gaplessPlayback: true, fit: widget.fit),
     );
 
-    final sized = Center(
+    final w = widget.width;
+    final h = widget.height;
+    if (w != null && h != null) return SizedBox(width: w, height: h, child: body);
+    final byAspect = Center(
       child: AspectRatio(aspectRatio: 9 / 19.5, child: body),
     );
-    final h = widget.height;
-    return h == null ? sized : SizedBox(height: h, child: sized);
+    return h == null ? byAspect : SizedBox(height: h, child: byAspect);
   }
-}
-
-/// 底部弹出「看虚拟屏」：聊天里随时瞄一眼 AI 正在操作的那块屏。
-Future<void> showVirtualDisplaySheet(BuildContext context, {VirtualDisplayChannel? channel}) {
-  return showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
-    builder: (ctx) {
-      final h = MediaQuery.of(ctx).size.height;
-      return SizedBox(
-        height: h * 0.72,
-        child: Column(
-          children: [
-            ListTile(
-              dense: true,
-              title: Text(t('虚拟屏（AI 正在操作的那块）', 'Virtual display (what the AI sees)')),
-              subtitle: Text(
-                t('只读预览；要操作请让 AI 做', 'Read-only preview; ask the AI to act'),
-                style: const TextStyle(fontSize: 12),
-              ),
-            ),
-            Expanded(child: VirtualDisplayPreview(channel: channel)),
-            const SizedBox(height: 8),
-          ],
-        ),
-      );
-    },
-  );
 }

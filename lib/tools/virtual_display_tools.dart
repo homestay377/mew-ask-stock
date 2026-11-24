@@ -11,6 +11,7 @@ library;
 
 import 'dart:io';
 
+import '../core/virtual_display_overlay_state.dart';
 import 'tool.dart';
 import 'mini_phone_channel.dart';
 import 'virtual_display_channel.dart';
@@ -185,6 +186,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
       final detail = r['detail'] ?? r['message'];
       return '$what 没有成功：$err${detail == null ? '' : '（$detail）'}';
     }
+    VirtualDisplayOverlayState.show();
     // 界面切换需要时间；这里给一个很短的让路，避免读到动作前的帧
     await Future<void>.delayed(const Duration(milliseconds: 350));
     return '$what 已下发。\n\n${await readScreen()}';
@@ -262,6 +264,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
         if (r['ok'] != true) {
           return '打开 $label（$pkg）失败：${r['error'] ?? ''} ${r['detail'] ?? ''}'.trim();
         }
+        VirtualDisplayOverlayState.show();
         // 等界面真的有内容再回话：App 刚起时常是白屏/未挂载，这时读不到字。
         var text = await readScreen();
         for (var i = 0; i < 3 && _screenSeemsEmpty(text); i++) {

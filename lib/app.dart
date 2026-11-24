@@ -14,6 +14,7 @@ import 'ui/pages/history_page.dart';
 import 'ui/pages/misc_settings.dart';
 import 'ui/pages/sub_agents_page.dart';
 import 'ui/pages/virtual_display_page.dart';
+import 'ui/widgets/virtual_display_overlay.dart';
 import 'ui/pages/tools_pages.dart';
 import 'ui/settings/providers_page.dart';
 import 'ui/settings/settings_page.dart';
@@ -107,7 +108,14 @@ class _MewHubAppState extends State<MewHubApp> with WidgetsBindingObserver {
           value: mewSystemUiOverlayStyle(theme.brightness),
           // Both routes can be translucent mid-transition. Keep the app's
           // surface behind the Navigator, even if the native window is light.
-          child: ColoredBox(color: theme.scaffoldBackgroundColor, child: child),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              ColoredBox(color: theme.scaffoldBackgroundColor, child: child),
+              // 虚拟屏悬浮窗：挂在所有页面之上，拖动、点开放大、点外面缩回
+              const VirtualDisplayOverlay(),
+            ],
+          ),
         );
       },
       // Rebuild every page when the language changes, since strings come from t().

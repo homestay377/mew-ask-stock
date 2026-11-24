@@ -22,7 +22,7 @@ import '../stock/stock_chart_panel.dart';
 import '../export.dart';
 import '../widgets/common.dart';
 import '../widgets/motion.dart';
-import '../widgets/virtual_display_preview.dart';
+import '../../core/virtual_display_overlay_state.dart';
 import 'chat_drawer.dart';
 import 'chat_navigation.dart';
 import 'chat_quick_sheets.dart';
@@ -786,8 +786,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       case 'export_md':
         await shareText(ConversationExport.markdown(conv), '${ConversationExport.fileName(conv)}.md');
       case 'vd':
-        if (!mounted) return;
-        await showVirtualDisplaySheet(context);
+        VirtualDisplayOverlayState.toggle();
       case 'usage':
         if (!mounted) return;
         await showChatUsageSheet(context, conv, contextLength: c.resolvedModel?.model.contextLength);
