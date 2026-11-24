@@ -34,4 +34,7 @@ interface IShellDisplay {
 
     /** 服务所在进程的 [uid, pid]，App 侧据此确认 binder 来自预期的身份。 */
     int[] identity() = 8;
+
+    /** 上一次建屏失败的原因（success 后清空）；没失败过返回 null。 */
+    String lastError() = 9;
 }

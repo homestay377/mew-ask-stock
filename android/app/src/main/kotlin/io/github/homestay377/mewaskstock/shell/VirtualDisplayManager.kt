@@ -73,7 +73,10 @@ object VirtualDisplayManager {
             false
         }
         if (!ok) {
-            status = Status(Phase.FAILED, shellUid = uid, detail = "createVirtualDisplay rejected")
+            // 把 shell 侧记下的具体原因带出来（哪一档标志位、什么异常），别再只说"被拒"
+            val why = runCatching { service.lastError() }.getOrNull()
+            status = Status(Phase.FAILED, shellUid = uid, detail = why ?: "createVirtualDisplay rejected")
+            Log.w(TAG, "createDisplay failed: ${status.detail}")
             return status
         }
         host = h

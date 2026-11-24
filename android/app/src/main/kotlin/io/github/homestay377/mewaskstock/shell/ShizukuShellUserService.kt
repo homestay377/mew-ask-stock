@@ -46,6 +46,8 @@ class ShizukuShellUserService private constructor(dummy: Boolean) : IShellDispla
 
     override fun identity(): IntArray = delegate.identity()
 
+    override fun lastError(): String? = delegate.lastError()
+
     @Suppress("DEPRECATION")
     private fun ensureMainLooper() {
         if (Looper.myLooper() == null) Looper.prepareMainLooper()

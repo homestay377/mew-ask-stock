@@ -35,24 +35,46 @@ class ShellDisplayService : IShellDisplay.Stub() {
     private val lock = Any()
 
     override fun createDisplay(surface: Surface, width: Int, height: Int, dpi: Int): Int {
-        val dm = displayManager() ?: return -1
-        // 先按"可信屏"建；没有 ADD_TRUSTED_DISPLAY 的系统会抛 SecurityException，去掉它们再建一次
-        for (trusted in booleanArrayOf(true, false)) {
+        val dm = displayManager() ?: run {
+            lastError = "拿不到 DisplayManager（shell 进程上下文没建起来）"
+            return -1
+        }
+        // 逐级降级：每一步都可能被不同厂商的系统拒绝（缺 ADD_TRUSTED_DISPLAY、
+        // 不允许 OWN_CONTENT_ONLY、不允许 PUBLIC 等）。Mika 只降一次，这里多给几档。
+        val plans = buildList {
+            add("trusted" to displayFlags(Build.VERSION.SDK_INT, trusted = true))
+            add("untrusted" to displayFlags(Build.VERSION.SDK_INT, trusted = false))
+            add("minimal" to (FLAG_PUBLIC or FLAG_OWN_CONTENT_ONLY or FLAG_SUPPORTS_TOUCH))
+            add("bare" to FLAG_PUBLIC)
+        }
+        for ((name, flags) in plans) {
             try {
-                val flags = displayFlags(Build.VERSION.SDK_INT, trusted)
-                val vd = dm.createVirtualDisplay(NAME, width, height, dpi, surface, flags) ?: continue
+                val vd = dm.createVirtualDisplay(NAME, width, height, dpi, surface, flags)
+                if (vd == null) {
+                    lastError = "$name: createVirtualDisplay 返回 null"
+                    Log.w(TAG, "createDisplay returned null ($name, flags=0x${flags.toString(16)})")
+                    continue
+                }
                 val id = vd.display.displayId
                 synchronized(lock) { displays[id] = vd }
                 setFullscreenWindowingMode(id)
                 setImePolicy(id)
-                Log.i(TAG, "createDisplay id=$id ${width}x$height trusted=$trusted")
+                Log.i(TAG, "createDisplay id=$id ${width}x$height via $name (flags=0x${flags.toString(16)})")
+                lastError = null
                 return id
             } catch (t: Throwable) {
-                Log.w(TAG, "createDisplay failed (trusted=$trusted)", t)
+                lastError = "$name: ${t.javaClass.simpleName}: ${t.message}"
+                Log.w(TAG, "createDisplay failed ($name, flags=0x${flags.toString(16)})", t)
             }
         }
         return -1
     }
+
+    /** 最近一次建屏失败的原因，App 侧会读出来给用户看。 */
+    override fun lastError(): String? = lastError
+
+    @Volatile
+    private var lastError: String? = null
 
     override fun releaseDisplay(displayId: Int) {
         val vd = synchronized(lock) { displays.remove(displayId) }
@@ -264,8 +286,11 @@ class ShellDisplayService : IShellDisplay.Stub() {
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE, KeyEvent.KEYCODE_ESCAPE,
         )
 
-        // VirtualDisplay 的标志位。SUPPORTS_TOUCH / ROTATES_WITH_CONTENT / DESTROY_CONTENT_ON_REMOVAL
-        // 在 DisplayManager 里也是隐藏常量（@hide），所以一并写死数值，不引用它们。
+        // VirtualDisplay 的标志位。**全部写死数值**（Mika 同款口径）：
+        // 这些常量大部分是 @hide 或在不同 API 级别数值不同，引用 DisplayManager 的字段
+        // 会得到"看起来对、实际错"的值——第一次建屏被拒就是这个原因。
+        const val FLAG_PUBLIC = 1 shl 0
+        const val FLAG_OWN_CONTENT_ONLY = 1 shl 3
         const val FLAG_SUPPORTS_TOUCH = 1 shl 6
         const val FLAG_ROTATES_WITH_CONTENT = 1 shl 7
         const val FLAG_DESTROY_CONTENT_ON_REMOVAL = 1 shl 8
@@ -281,8 +306,7 @@ class ShellDisplayService : IShellDisplay.Stub() {
          * 安卓 14 起可信屏才有 OWN_FOCUS/STEAL_TOP_FOCUS_DISABLED（后者让虚拟屏不抢主屏焦点）。
          */
         fun displayFlags(sdk: Int, trusted: Boolean): Int {
-            var flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
+            var flags = FLAG_PUBLIC or FLAG_OWN_CONTENT_ONLY or
                 FLAG_SUPPORTS_TOUCH or FLAG_ROTATES_WITH_CONTENT or FLAG_DESTROY_CONTENT_ON_REMOVAL
             if (sdk >= Build.VERSION_CODES.TIRAMISU) {
                 flags = flags or FLAG_TOUCH_FEEDBACK_DISABLED
