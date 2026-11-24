@@ -365,6 +365,12 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
   ];
 }
 
+/// 粗略判断是不是行情类 App（只用于默认过滤，不用于断定身份）。
+bool _looksLikeMarket(String label) {
+  const hints = ['同花顺', '通达信', '雪球', '开盘啦', '东方财富', '大智慧', '老虎', '富途', '股票', '证券', '行情', '炒股', '涨乐', '自选股', '韭研', '韭圈'];
+  return hints.any(label.contains);
+}
+
 /// 把 OCR 结果渲染成给模型看的文本：每行带坐标，方便它直接点。
 String renderOcrForModel(List<Map<String, dynamic>> lines, {int maxElements = 80}) {
   if (lines.isEmpty()) return '（没有认出文字）';
@@ -381,10 +387,4 @@ String renderOcrForModel(List<Map<String, dynamic>> lines, {int maxElements = 80
     n++;
   }
   return buf.toString().trimRight();
-}
-
-/// 粗略判断是不是行情类 App（只用于默认过滤，不用于断定身份）。
-bool _looksLikeMarket(String label) {
-  const hints = ['同花顺', '通达信', '雪球', '开盘啦', '东方财富', '大智慧', '老虎', '富途', '股票', '证券', '行情', '炒股', '涨乐', '自选股', '韭研', '韭圈'];
-  return hints.any(label.contains);
 }
