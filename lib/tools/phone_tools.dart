@@ -16,7 +16,6 @@ library;
 
 import 'dart:io';
 
-import '../core/util.dart';
 import 'mini_phone_channel.dart';
 import 'tool.dart';
 
