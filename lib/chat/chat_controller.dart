@@ -13,6 +13,7 @@ import '../ai/message.dart';
 import '../ai/provider.dart';
 import '../ai/provider_config.dart';
 import '../core/i18n.dart';
+import '../core/keep_alive.dart';
 import '../core/net.dart';
 import '../core/virtual_display_shot.dart';
 import '../core/retry.dart';
@@ -560,6 +561,7 @@ class ChatController extends ChangeNotifier {
       }
     } finally {
       VirtualDisplayShot.reset();
+      unawaited(KeepAlive.stop());
       acc.closeAll();
       // A superseded stream (edit, regenerate, new turn) must not write back:
       // its node may already have been replaced by a newer generation.
