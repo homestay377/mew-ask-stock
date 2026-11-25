@@ -53,4 +53,19 @@ interface IShellDisplay {
      * 这样用户不用自己去系统设置里点开（做法对齐 Mika 的 RecoveryPermissions）。
      */
     String execShell(String command) = 11;
+
+    /** 把 [taskId] 这个任务挪到 [displayId]；成功返回 true。 */
+    boolean moveTask(int taskId, int displayId) = 12;
+
+    /** 某个包当前的任务号（任意一块屏上）；没有任务返回 -1。 */
+    int taskOfPackage(String packageName) = 13;
+
+    /**
+     * 一笔按时间走的触摸：第 i 个点在 (xs[i], ys[i])、按下后 times[i] 毫秒。
+     * 第一个点是按下、最后一个点是抬起——长按、拖动、曲线滑动都靠它。
+     */
+    boolean injectStroke(int displayId, in int[] xs, in int[] ys, in long[] times) = 14;
+
+    /** 滚轮事件（ACTION_SCROLL），比模拟手指更贴近"滚动"语义，长列表更稳。 */
+    boolean injectScroll(int displayId, int x, int y, int hScroll, int vScroll) = 15;
 }
