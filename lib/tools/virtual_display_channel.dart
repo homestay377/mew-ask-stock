@@ -106,6 +106,25 @@ class VirtualDisplayChannel {
 
   Future<Map<String, dynamic>> topTask() => _call('top_task');
 
+  /// 把一个任务挪到这块屏（App 从后台拉起页面掉到主屏时用）。
+  Future<Map<String, dynamic>> moveTask(int taskId, {int? displayId}) =>
+      _call('move_task', args: {'taskId': taskId, 'displayId': ?displayId});
+
+  /// 某个包当前的任务号（任意一块屏上）；没有返回 -1。
+  Future<int> taskOfPackage(String packageName) async {
+    final r = await _call('task_of_package', args: {'package': packageName});
+    return (r['taskId'] as num?)?.toInt() ?? -1;
+  }
+
+  /// 一笔按时间走的触摸：第 i 点在 (xs[i], ys[i])、按下后 times[i] 毫秒。
+  /// 长按就是两点同坐标；拖动就是多点连成路径。
+  Future<Map<String, dynamic>> stroke(List<int> xs, List<int> ys, List<int> times) =>
+      _call('inject_stroke', args: {'xs': xs, 'ys': ys, 'times': times});
+
+  /// 滚轮（ACTION_SCROLL）：比模拟手指更像"滚动"，长列表更稳。v<0 向下滚。
+  Future<Map<String, dynamic>> scroll({required int x, required int y, int h = 0, int v = 0}) =>
+      _call('inject_scroll', args: {'x': x, 'y': y, 'h': h, 'v': v});
+
   /// 当前画面指纹（`hash:宽:高`），没有画面时空串。
   /// 采样几十个像素算 FNV-1a，几毫秒——用来判断"这一下点下去界面变没变"，
   /// 比动作后跑一遍 OCR（几百毫秒）便宜得多。
