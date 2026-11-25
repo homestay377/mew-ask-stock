@@ -378,8 +378,9 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
         }
         var pulledBack = false;
         if (!hasTask) {
+          final cur = await d.vd.status();
           final taskId = await d.vd.taskOfPackage(pkg);
-          if (taskId > 0 && taskId != st.displayId) {
+          if (taskId > 0 && taskId != cur.displayId) {
             final moved = await d.vd.moveTask(taskId);
             if (moved['ok'] == true) {
               pulledBack = true;
