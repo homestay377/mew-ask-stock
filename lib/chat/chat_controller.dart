@@ -299,7 +299,7 @@ class ChatController extends ChangeNotifier {
       // 手机操控（无障碍，操作主屏）：读屏 + 点击 + 输入。
       ...buildPhoneTools(enabled: a.enablePhoneControl),
       // 虚拟屏（Shizuku / 无线调试）：在后台看不见的屏上开别的 App，不打断用户。
-      ...buildVirtualDisplayTools(enabled: a.enableVirtualDisplay),
+      ...buildVirtualDisplayTools(enabled: a.enableVirtualDisplay, stallLimit: settings.stallLimit),
       // 基础执行能力：出网 + 受控文件读写。主智能体与子智能体共用同一套。
       buildHttpTool(),
       ...buildWorkspaceTools(),
@@ -475,7 +475,7 @@ class ChatController extends ChangeNotifier {
       // 一轮对话里最多允许多少个"模型→工具→模型"回合。
       // 原来写死 32：像"打开 App→搜索→翻页→再点→输入"这种连续操作，四五个回合一步，
       // 很容易在任务没做完时就撞上限，而且是**静默退出**，看起来就是"莫名其妙停了"。
-      const maxToolRounds = 100;
+      final maxToolRounds = settings.toolRoundLimit.clamp(8, 400);
       var round = 0;
       for (; round < maxToolRounds; round++) {
         if (cancel.isCancelled) break;
