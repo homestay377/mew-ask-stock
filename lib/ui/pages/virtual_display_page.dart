@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:mewhub/core/i18n.dart';
+import 'package:mewhub/state/settings_store.dart';
 import 'package:mewhub/tools/virtual_display_channel.dart';
 import 'package:mewhub/ui/widgets/common.dart';
 import 'package:mewhub/ui/widgets/virtual_display_preview.dart';
@@ -280,6 +282,46 @@ class _VirtualDisplayPageState extends State<VirtualDisplayPage> {
                     }, t('已重建', 'Recreated')),
                   ),
                 ],
+              ),
+            // 操作限额：这两个数字原来写死在代码里，卡住/停不下来都只能靠改版本。
+            if (st?.usable == true)
+              Consumer<SettingsStore>(
+                builder: (ctx, store, _) {
+                  final s = store.value;
+                  return SettingsGroup(
+                    title: t('操作限额', 'Operation limits'),
+                    footer: t(
+                      '回合上限：一轮对话里最多允许多少个「模型→工具→模型」。跑满会明说一句再停。
+'
+                          '无进展阈值：连续几次动作后画面都没变就算卡住（太小会把"在加载"误判成卡死）。',
+                      'Tool rounds per turn, and how many unchanged frames count as stuck.',
+                    ),
+                    children: [
+                      ListTile(
+                        title: Text(t('回合上限', 'Tool rounds per turn')),
+                        subtitle: Slider(
+                          value: s.toolRoundLimit.clamp(20, 300).toDouble(),
+                          min: 20,
+                          max: 300,
+                          divisions: 28,
+                          label: '${s.toolRoundLimit}',
+                          onChanged: (v) => store.update((x) => x.copyWith(toolRoundLimit: v.round())),
+                        ),
+                      ),
+                      ListTile(
+                        title: Text(t('无进展阈值（次）', 'Stuck after N actions')),
+                        subtitle: Slider(
+                          value: s.stallLimit.clamp(2, 20).toDouble(),
+                          min: 2,
+                          max: 20,
+                          divisions: 18,
+                          label: '${s.stallLimit}',
+                          onChanged: (v) => store.update((x) => x.copyWith(stallLimit: v.round())),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
           ],
         ),
