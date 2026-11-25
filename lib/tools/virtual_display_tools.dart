@@ -11,6 +11,7 @@ library;
 
 import 'dart:io';
 
+import '../core/keep_alive.dart';
 import '../core/paths.dart';
 import '../core/virtual_display_overlay_state.dart';
 import '../core/virtual_display_shot.dart';
@@ -139,7 +140,11 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
       final inflight = building ??= buildOnce(force: force).whenComplete(() => building = null);
       off = await inflight;
     }
-    if (off == null) await ensureAccessibilityOnce();
+    if (off == null) {
+      await ensureAccessibilityOnce();
+      // 虚拟屏一用起来就按住进程：否则一轮结束、通知撤掉，后台很快被系统收走
+      await KeepAlive.start('虚拟屏已就绪');
+    }
     return off;
   }
 
@@ -232,6 +237,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
       return '$what 没有成功：$err${detail == null ? '' : '（$detail）'}';
     }
     VirtualDisplayOverlayState.show();
+    await KeepAlive.status(what);
     // 界面切换需要时间；这里只留很短的一点，避免读到动作前的帧。
     await Future<void>.delayed(const Duration(milliseconds: 180));
     final st = await d.vd.status();
@@ -341,6 +347,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
           return '打开 $label（$pkg）失败：${r['error'] ?? ''} ${r['detail'] ?? ''}'.trim();
         }
         VirtualDisplayOverlayState.show();
+        await KeepAlive.status('正在打开 $label');
         // 等界面真的有内容再回话：App 刚起时常是白屏/未挂载，这时读不到字。
         var text = await readScreen();
         for (var i = 0; i < 3 && _screenSeemsEmpty(text); i++) {
