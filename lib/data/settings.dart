@@ -214,6 +214,8 @@ class AppSettings {
     this.compressPrompt = defaultCompressPrompt,
     this.autoCompress = true,
     this.autoCompressThreshold = 98,
+    this.toolRoundLimit = 100,
+    this.stallLimit = 6,
     this.autoTitle = true,
     this.suggestions = true,
     this.favoriteModelIds = const [],
@@ -263,6 +265,12 @@ class AppSettings {
   final String compressPrompt;
   final bool autoCompress;
   final int autoCompressThreshold;
+
+  /// 一轮对话里最多允许多少个"模型→工具→模型"回合。跑满会明说一句再停。
+  final int toolRoundLimit;
+
+  /// 连续多少次动作后画面没变就不算"在加载"了（虚拟屏工具用它判断是不是卡住）。
+  final int stallLimit;
   final bool autoTitle;
   final bool suggestions;
   final List<String> favoriteModelIds;
@@ -353,6 +361,8 @@ class AppSettings {
     String? compressPrompt,
     bool? autoCompress,
     int? autoCompressThreshold,
+    int? toolRoundLimit,
+    int? stallLimit,
     bool? autoTitle,
     bool? suggestions,
     List<String>? favoriteModelIds,
@@ -403,6 +413,8 @@ class AppSettings {
     compressPrompt: compressPrompt ?? this.compressPrompt,
     autoCompress: autoCompress ?? this.autoCompress,
     autoCompressThreshold: autoCompressThreshold ?? this.autoCompressThreshold,
+    toolRoundLimit: toolRoundLimit ?? this.toolRoundLimit,
+    stallLimit: stallLimit ?? this.stallLimit,
     autoTitle: autoTitle ?? this.autoTitle,
     suggestions: suggestions ?? this.suggestions,
     favoriteModelIds: favoriteModelIds ?? this.favoriteModelIds,
@@ -478,6 +490,8 @@ class AppSettings {
       compressPrompt: asStr(j['compressPrompt'], defaultCompressPrompt),
       autoCompress: asBool(j['autoCompress'], true),
       autoCompressThreshold: asInt(j['autoCompressThreshold'], 98).clamp(1, 100),
+      toolRoundLimit: asInt(j['toolRoundLimit'], 100).clamp(8, 400),
+      stallLimit: asInt(j['stallLimit'], 6).clamp(2, 50),
       autoTitle: asBool(j['autoTitle'], true),
       suggestions: asBool(j['suggestions'], true),
       favoriteModelIds: asList(j['favoriteModelIds']).map((e) => e.toString()).toList(),
@@ -536,6 +550,8 @@ class AppSettings {
     'compressPrompt': compressPrompt,
     'autoCompress': autoCompress,
     'autoCompressThreshold': autoCompressThreshold,
+    'toolRoundLimit': toolRoundLimit,
+    'stallLimit': stallLimit,
     'autoTitle': autoTitle,
     'suggestions': suggestions,
     'favoriteModelIds': favoriteModelIds,
