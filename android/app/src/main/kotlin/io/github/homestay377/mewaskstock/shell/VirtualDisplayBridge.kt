@@ -334,6 +334,40 @@ class VirtualDisplayBridge(
                             )
                         }
                     }
+                    "move_task" -> {
+                        val taskId = call.argument<Int>("taskId") ?: -1
+                        val target = call.argument<Int>("displayId") ?: id
+                        worker.execute {
+                            val ok = runCatching { svc.moveTask(taskId, target) }.getOrDefault(false)
+                            main.post { result.success(mapOf("ok" to ok)) }
+                        }
+                    }
+                    "task_of_package" -> {
+                        val pkg = call.argument<String>("package").orEmpty()
+                        worker.execute {
+                            val t = runCatching { svc.taskOfPackage(pkg) }.getOrDefault(-1)
+                            main.post { result.success(mapOf("ok" to (t >= 0), "taskId" to t)) }
+                        }
+                    }
+                    "inject_stroke" -> {
+                        val xs = call.argument<List<Int>>("xs")?.toIntArray() ?: IntArray(0)
+                        val ys = call.argument<List<Int>>("ys")?.toIntArray() ?: IntArray(0)
+                        val times = call.argument<List<Int>>("times")?.map { it.toLong() }?.toLongArray() ?: LongArray(0)
+                        worker.execute {
+                            val ok = runCatching { svc.injectStroke(id, xs, ys, times) }.getOrDefault(false)
+                            main.post { result.success(mapOf("ok" to ok)) }
+                        }
+                    }
+                    "inject_scroll" -> {
+                        val x = call.argument<Int>("x") ?: 0
+                        val y = call.argument<Int>("y") ?: 0
+                        val h = call.argument<Int>("h") ?: 0
+                        val v = call.argument<Int>("v") ?: 0
+                        worker.execute {
+                            val ok = runCatching { svc.injectScroll(id, x, y, h, v) }.getOrDefault(false)
+                            main.post { result.success(mapOf("ok" to ok)) }
+                        }
+                    }
                     "top_task" -> worker.execute {
                         val t = runCatching { svc.topTaskId(id) }.getOrDefault(-1)
                         main.post { result.success(mapOf("ok" to (t >= 0), "taskId" to t)) }
