@@ -158,6 +158,17 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
   /// 3. 都不行才说读不到。
   ///
   /// 所以"没开无障碍"不等于用不了——这正是 Mika 的做法。
+  /// 点一下，或者按住不放。
+  ///
+  /// [holdMs] ≥ 350 时用笔画注入（同一个点按下→等→抬起），这就是系统眼里的长按；
+  /// 否则走普通点击。
+  Future<Map<String, dynamic>> tapOrHold(int x, int y, int? holdMs) {
+    if (holdMs != null && holdMs >= 350) {
+      return d.vd.stroke([x, x], [y, y], [0, holdMs]);
+    }
+    return d.vd.tap(x, y);
+  }
+
   /// 在结果前面写明"坐标按这个尺寸算"，避免模型拿截图（缩放预览）的像素当坐标。
   String withSize(VirtualDisplayStatus st, String text) {
     final w = st.displayWidth;
@@ -352,13 +363,37 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
         }
         VirtualDisplayOverlayState.show();
         await KeepAlive.status('正在打开 $label');
+
+        // App 有时不走"启动到这块屏"，而是从后台把页面拉到**用户主屏**。
+        // 等一会儿；我们的屏上还是没有任务，就找到它的任务号挪回来（对齐 Mika 的 pullBack）。
+        var hasTask = false;
+        for (var i = 0; i < 6; i++) {
+          final top = await d.vd.topTask();
+          final tid = (top['taskId'] as num?)?.toInt() ?? -1;
+          if (tid >= 0) {
+            hasTask = true;
+            break;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+        }
+        var pulledBack = false;
+        if (!hasTask) {
+          final taskId = await d.vd.taskOfPackage(pkg);
+          if (taskId > 0 && taskId != st.displayId) {
+            final moved = await d.vd.moveTask(taskId);
+            if (moved['ok'] == true) {
+              pulledBack = true;
+              await Future<void>.delayed(const Duration(milliseconds: 350));
+            }
+          }
+        }
         // 等界面真的有内容再回话：App 刚起时常是白屏/未挂载，这时读不到字。
         var text = await readScreen();
         for (var i = 0; i < 3 && _screenSeemsEmpty(text); i++) {
           await Future<void>.delayed(const Duration(milliseconds: 800));
           text = await readScreen();
         }
-        return '已在虚拟屏打开 $label（$pkg）。\n\n$text';
+        return '已在虚拟屏打开 $label（$pkg）${pulledBack ? '（刚才任务掉到主屏了，已挪回来）' : ''}。\n\n$text';
       },
     ),
     AppTool(
@@ -473,6 +508,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
         'text': strProp('要点的文字，如「自选股」「F10」「买入」；找不到会告诉你'),
         'x': intProp('X 坐标（虚拟屏像素）'),
         'y': intProp('Y 坐标（虚拟屏像素）'),
+        'holdMs': intProp('按住多少毫秒；≥350 就是长按（默认单击）'),
       }),
       promptHint:
           '这是**连续操作**：点开搜索框 → 输入代码 → 回车 → 看结果，一步一步接着做，'
@@ -482,6 +518,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
         if (off != null) return off;
         final st = await d.vd.status();
         final ref = '${args['ref'] ?? ''}'.trim();
+        final holdMs = (args['holdMs'] as num?)?.toInt();
         if (ref.isNotEmpty) {
           // ref 是主屏/虚拟屏通用的读屏编号，点击仍走虚拟屏的注入
           final snap = await d.phone.observe(displayId: st.displayId);
@@ -493,7 +530,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
           final c = (hit['center'] as List?) ?? const [0, 0];
           final x = (c[0] as num).toInt();
           final y = (c[1] as num).toInt();
-          return actThenLook('点 $ref「${hit['name']}」', () => d.vd.tap(x, y));
+          return actThenLook('点 $ref「${hit['name']}」', () => tapOrHold(x, y, holdMs));
         }
         // 按文字点：先无障碍树（准），没有再 OCR（只有文字行）
         final want = '${args['text'] ?? ''}'.trim().toLowerCase();
@@ -503,7 +540,10 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
             final m = (e as Map);
             if ('${m['name'] ?? ''}'.toLowerCase().trim() != want) continue;
             final c = (m['center'] as List?) ?? const [0, 0];
-            return actThenLook('点「${m['name']}」', () => d.vd.tap((c[0] as num).toInt(), (c[1] as num).toInt()));
+            return actThenLook(
+              '点「${m['name']}」',
+              () => tapOrHold((c[0] as num).toInt(), (c[1] as num).toInt(), holdMs),
+            );
           }
           final lines = await d.vd.ocr();
           final exact = lines.where((l) => '${l['text'] ?? ''}'.toLowerCase().trim() == want).toList();
@@ -513,7 +553,10 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
             return '虚拟屏上没有「${args['text']}」这个文字。先 vd_observe 看现在是什么界面。';
           }
           final c = (pick['center'] as List?) ?? const [0, 0];
-          return actThenLook('点「${pick['text']}」', () => d.vd.tap((c[0] as num).toInt(), (c[1] as num).toInt()));
+          return actThenLook(
+            '点「${pick['text']}」',
+            () => tapOrHold((c[0] as num).toInt(), (c[1] as num).toInt(), holdMs),
+          );
         }
 
         final x = (args['x'] as num?)?.toInt();
@@ -526,7 +569,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
           return '坐标 ($x,$y) 超出虚拟屏（$w×$h）。坐标按这块屏的像素给，'
               '或者直接用 ref / text 点——那样不用关心数值。';
         }
-        return actThenLook('点 ($x,$y)', () => d.vd.tap(x, y));
+        return actThenLook('点 ($x,$y)', () => tapOrHold(x, y, holdMs));
       },
     ),
     AppTool(
@@ -555,7 +598,83 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
           'right' => (cx - amount ~/ 2, cy, cx + amount ~/ 2, cy),
           _ => (cx, cy + amount ~/ 2, cx, cy - amount ~/ 2),
         };
-        return actThenLook('向$dir 滚动', () => d.vd.swipe(sx, sy, ex, ey));
+        // 先发滚轮：ACTION_SCROLL 才是"滚动"的语义，长列表/嵌套滚动都更稳；
+        // 目标不认滚轮时再退回模拟手指（v<0 向下滚）。
+        final wheelV = switch (dir) {
+          'down' => -(amount ~/ 8),
+          'up' => amount ~/ 8,
+          _ => 0,
+        };
+        final wheelH = switch (dir) {
+          'right' => -(amount ~/ 8),
+          'left' => amount ~/ 8,
+          _ => 0,
+        };
+        return actThenLook('向$dir 滚动', () async {
+          final wheel = await d.vd.scroll(x: cx, y: cy, h: wheelH, v: wheelV);
+          if (wheel['ok'] == true) return wheel;
+          return d.vd.swipe(sx, sy, ex, ey);
+        });
+      },
+    ),
+    AppTool(
+      name: 'vd_drag',
+      displayName: '拖虚拟屏',
+      description:
+          '按住一点拖到另一点（拖动排序、拖动 K 线十字线、滑动条都靠它）。'
+          '坐标按虚拟屏像素；不给坐标就给 from/to 的文字，先在无障碍树/OCR 里找。',
+      parameters: objectSchema({
+        'from_x': intProp('起点 X'),
+        'from_y': intProp('起点 Y'),
+        'to_x': intProp('终点 X'),
+        'to_y': intProp('终点 Y'),
+        'from_text': strProp('起点文字（找不到坐标时用）'),
+        'to_text': strProp('终点文字'),
+        'durationMs': intProp('拖动时长，默认 500'),
+      }),
+      execute: (args) async {
+        final off = await ensureReady();
+        if (off != null) return off;
+        final st = await d.vd.status();
+
+        Future<List<int>?> pointOf(String keyX, String keyY, String textKey) async {
+          final x = (args[keyX] as num?)?.toInt();
+          final y = (args[keyY] as num?)?.toInt();
+          if (x != null && y != null) return [x, y];
+          final want = '${args[textKey] ?? ''}'.trim().toLowerCase();
+          if (want.isEmpty) return null;
+          final snap = await d.phone.observe(displayId: st.displayId);
+          for (final e in ((snap['elements'] as List?) ?? const [])) {
+            final m = (e as Map);
+            if ('${m['name'] ?? ''}'.toLowerCase().trim() != want) continue;
+            final c = (m['center'] as List?) ?? const [0, 0];
+            return [(c[0] as num).toInt(), (c[1] as num).toInt()];
+          }
+          final lines = await d.vd.ocr();
+          for (final l in lines) {
+            if ('${l['text'] ?? ''}'.toLowerCase().contains(want)) {
+              final c = (l['center'] as List?) ?? const [0, 0];
+              return [(c[0] as num).toInt(), (c[1] as num).toInt()];
+            }
+          }
+          return null;
+        }
+
+        final from = await pointOf('from_x', 'from_y', 'from_text');
+        final to = await pointOf('to_x', 'to_y', 'to_text');
+        if (from == null || to == null) return '需要起点和终点：坐标对，或者 from_text / to_text。';
+        final ms = ((args['durationMs'] as num?)?.toInt() ?? 500).clamp(120, 4000);
+        const steps = 12;
+        final xs = <int>[];
+        final ys = <int>[];
+        final times = <int>[];
+        for (var i = 0; i <= steps; i++) {
+          final t = i / steps;
+          xs.add((from[0] + (to[0] - from[0]) * t).round());
+          ys.add((from[1] + (to[1] - from[1]) * t).round());
+          times.add((ms * t).round());
+        }
+        return actThenLook('从 (${from[0]},${from[1]}) 拖到 (${to[0]},${to[1]})', () => d.vd.stroke(xs, ys, times));
       },
     ),
     AppTool(
