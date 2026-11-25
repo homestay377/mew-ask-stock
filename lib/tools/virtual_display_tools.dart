@@ -41,6 +41,10 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
   // 只有真的缺前提（服务没跑 / 没授权 / 系统拒绝）才把**那一步**报出来。
   var displayId = -1;
   var askedPermission = false;
+
+  /// 连续多少次动作后界面一点没变。用来识别"在打转"：
+  /// 一直点、一直没效果，与其烧满 100 个回合，不如早点叫停并说清原因。
+  var noProgress = 0;
   Future<String?>? building;
 
   /// 调一次 `ensure_display`，并对「身份还在绑」这种瞬时状态重试。
@@ -234,7 +238,19 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     final after = await d.vd.fingerprint();
     // 指纹只回答一个问题：这一下点下去，界面到底变了没有。成本几毫秒。
     final changed = before.isNotEmpty && after.isNotEmpty && before != after;
+    noProgress = changed ? 0 : noProgress + 1;
     final changeNote = changed ? '界面已变化' : '界面看起来没变（可能没点中，或还在加载）';
+
+    if (noProgress >= 3) {
+      // 别让它继续空转：连续三次界面没变，八成是屏没刷新 / 点错了 / 卡在弹窗上
+      final st0 = await d.vd.status();
+      sw.stop();
+      return '$what 已下发，但**连续 $noProgress 次操作界面都没有任何变化**，看起来不是正常卡顿。\n'
+          '先别继续点了，按这个顺序确认：\n'
+          '1. vd_observe 看这页到底是什么（有没有弹窗、广告、需要登录）；\n'
+          '2. 屏幕 ${st0.displayWidth ?? '?'}×${st0.displayHeight ?? '?'}，如果之前用的是坐标，改成 vd_tap 的 text / ref；\n'
+          '3. 还不行就如实告诉用户"卡在哪一步、看到什么"，不要继续反复点。';
+    }
 
     if (!st.accessibility) {
       // 无障碍没连时读屏只能走 OCR：每次动作后再读一遍要几百毫秒，点起来就很"卡"。
@@ -295,6 +311,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
           '打开后自动读一次屏告诉你看到了什么。',
       parameters: objectSchema({'app': strProp('App 名字或包名，例如 同花顺 / 雪球 / com.xueqiu.android')}, required: ['app']),
       promptHint:
+          '这块虚拟屏没有系统导航栏（不显示手势条/三大金刚），回上一页一律用 vd_back，别去找按钮。'
           '需要看接口拿不到的行情（行业资金流、龙虎榜席位、F10 里没 API 的字段）时，'
           '用 vd_open 打开对应 App 读界面；能走 stock_kline / analyze_chan / stock_levels 的，优先走它们，不要开 App。',
       execute: (args) async {
