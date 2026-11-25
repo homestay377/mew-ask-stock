@@ -291,8 +291,7 @@ class _VirtualDisplayPageState extends State<VirtualDisplayPage> {
                   return SettingsGroup(
                     title: t('操作限额', 'Operation limits'),
                     footer: t(
-                      '回合上限：一轮对话里最多允许多少个「模型→工具→模型」。跑满会明说一句再停。
-'
+                      '回合上限：一轮对话里最多允许多少个「模型→工具→模型」。跑满会明说一句再停。'
                           '无进展阈值：连续几次动作后画面都没变就算卡住（太小会把"在加载"误判成卡死）。',
                       'Tool rounds per turn, and how many unchanged frames count as stuck.',
                     ),
