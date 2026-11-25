@@ -37,14 +37,17 @@ Mika 的路子是「**一个 shell 进程 + 一个富接口**」：`IMikaShell.a
 | 发现任务掉到主屏 | `watchMainScreen(windowMs)` + `mainArrivals(since)` + `MainScreenSpill.decide`（6 秒窗口，排除用户自己点的） | ❌ 缺 | 这是"我在虚拟屏点的，怎么跑到用户眼前了"的根治手段 |
 | 读屏（树） | `AccessibilityService.windowsOnAllDisplays[displayId]`，剔除输入法/浮层，深度 80、去重、**坐标归一化 0..999** | ✅ 基本一致 | `MiniPhoneAccessibility.snapshot(displayId)` |
 | **无障碍自己开** | `RecoveryPermissions`：shell 身份 `settings put secure enabled_accessibility_services`（先读后合并、两种组件名写法、回读校验） | ✅ **本轮补上** | `AccessibilityEnabler` + `IShellDisplay.execShell`；用户不再需要去系统设置里点 |
-| 界面指纹 | FNV-1a 混 className/text/desc/bounds/states | ❌ 缺 | 用于"这一页变了没"、避免重复读 |
+| 界面指纹 | FNV-1a 混 className/text/desc/bounds/states（**界面结构**指纹） | 🟡 部分 | 我们有**帧像素**指纹（64×64 采样）判断"变没变"；缺结构指纹，无法做"同一页不重复读" |
 | 读屏（OCR） | 中文 + 拉丁**两套模型并行**，坐标同样归一化 | ✅ 一致 | `ScreenOcr` |
 | 点击/滑动 | `injectInputEvent` + setDisplayId；按键用 WAIT_FOR_RESULT（派发失败要能察觉），触摸 ASYNC | ✅ 基本一致 | |
-| 手势笔画 | `injectStroke(displayId, xs, ys, times)`：按时间逐点注入 | ❌ 缺 | 长按、拖动这类需要多点时序 |
-| 输入文字 | 三条路：无障碍 ACTION_SET_TEXT / `injectAsciiText`（键盘事件）/ 剪贴板 + 粘贴 | ✅ 两条 | 本轮补了 `injectAsciiText`（只送 ASCII）；中文仍必须走无障碍 |
-| 滚轮 | `WheelDriver` 用 ACTION_SCROLL 而不是模拟手指 | ❌ 缺 | 长列表更稳 |
+| 手势笔画 | `injectStroke(displayId, xs, ys, times)`：按时间逐点注入 | ❌ **缺（优先）** | 长按、拖动、精确滑动都靠它；我们只有等速 swipe |
+| 输入文字 | 三条路：无障碍 ACTION_SET_TEXT / `injectAsciiText`（键盘事件）/ 剪贴板 + 粘贴 | 🟡 两条 | 有前两条；缺剪贴板路径——没连无障碍时打不了中文 |
+| 滚轮 | `WheelDriver` 用 ACTION_SCROLL 而不是模拟手指 | ❌ 缺 | 长列表更稳，也避免把"滚动"识别成"拖拽" |
 | 主屏不被抢 | `STEAL_TOP_FOCUS_DISABLED` + `MainScreenSpill` / `PipInput` | 🟡 只有前者 | |
 | 状态诊断 | `ScreenDiagnosis.classify` + Advice 文案 | ❌ 缺 | 我们只有 lastError / describe() |
+| **前台服务保活** | 内置助手常驻 + 通知 | ✅ **本轮补上** | `ChatGenerationService` hold/status/release，通知显示当前动作 |
+| **悬浮图标** | `OverlayHost`（系统级悬浮窗） | 🟡 我们做在 App 内 | 系统级悬浮图标已加（`FloatingBadge`），需 `SYSTEM_ALERT_WINDOW`（用 shell appops 开） |
+| **屏幕导航键** | 无（靠注入 BACK） | ✅ 我们多做了 | 放大视图下方一排 返回/桌面/最近任务 |
 
 ## 3. 该补的，按性价比排
 
@@ -100,3 +103,4 @@ git diff a40f6a9..HEAD -- app/src/main/java/com/wangzan101/mika/cap/phone \
 | 日期 | Mika 基线 | 搬了什么 |
 |---|---|---|
 | 2026-11-24 | `a40f6a9` | 首版基线。补 `DisplayAwake` 保活、删本地 skeleton 屏、补 `injectAsciiText` 键盘注入、无障碍自动开启 |
+| 2026-11-25 | `a40f6a9` | 继续：前台服务保活 + 系统级悬浮图标、帧像素指纹（判断"变没变"）、无进展检测（阈值可调）、导航键、回合上限可调 |
