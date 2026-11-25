@@ -243,6 +243,18 @@ class VirtualDisplayBridge(
                         val value = runCatching { VirtualDisplayManager.fingerprint() }.getOrDefault("")
                         result.success(mapOf("ok" to true, "value" to value))
                     }
+                    // 悬浮窗权限：同样用 shell 身份的 appops 直接开，省掉用户去系统设置里点一次
+                    "grant_overlay" -> {
+                        worker.execute {
+                            val svc = router.current().service
+                                ?: runCatching { router.resolve().service }.getOrNull()
+                            val out = runCatching {
+                                svc?.execShell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow")
+                            }.getOrNull().orEmpty()
+                            val ok = android.provider.Settings.canDrawOverlays(context)
+                            main.post { result.success(mapOf("ok" to ok, "detail" to out.take(200))) }
+                        }
+                    }
                     // 用 shell 身份把本应用的无障碍服务写进 secure 设置——用户不用自己去系统里点。
                     // 逐条纪律（先读后合并、组件名两种写法、写完回读）都在 AccessibilityEnabler 里。
                     "enable_accessibility" -> {
