@@ -18,6 +18,12 @@ import androidx.core.content.ContextCompat
 class ChatGenerationService : Service() {
     private val conversations = linkedSetOf<String>()
 
+    /** 虚拟屏在用时一直按住前台服务：否则一轮对话结束、通知撤掉，MIUI 很快就把它收了。 */
+    private var held = false
+
+    /** 通知/悬浮图标上那句"正在干什么"。 */
+    private var statusText: String? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -41,6 +47,28 @@ class ChatGenerationService : Service() {
 
             ACTION_STOP -> {
                 if (conversationId != null) conversations.remove(conversationId)
+                if (conversations.isEmpty() && !held) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf(startId)
+                } else {
+                    startForegroundNotification()
+                }
+            }
+
+            ACTION_HOLD -> {
+                held = true
+                statusText = intent.getStringExtra(EXTRA_STATUS)
+                startForegroundNotification()
+            }
+
+            ACTION_STATUS -> {
+                statusText = intent.getStringExtra(EXTRA_STATUS)
+                if (held || conversations.isNotEmpty()) startForegroundNotification()
+            }
+
+            ACTION_RELEASE -> {
+                held = false
+                statusText = null
                 if (conversations.isEmpty()) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf(startId)
@@ -61,8 +89,9 @@ class ChatGenerationService : Service() {
             .setSmallIcon(R.drawable.ic_stat_mewhub)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(
-                if (count == 1) getString(R.string.chat_generation_running)
-                else getString(R.string.chat_generations_running, count),
+                statusText?.takeIf { it.isNotBlank() }
+                    ?: if (count == 1) getString(R.string.chat_generation_running)
+                    else getString(R.string.chat_generations_running, count),
             )
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setOngoing(true)
@@ -104,7 +133,11 @@ class ChatGenerationService : Service() {
     companion object {
         private const val ACTION_START = "io.github.homestay377.mewaskstock.CHAT_GENERATION_START"
         private const val ACTION_STOP = "io.github.homestay377.mewaskstock.CHAT_GENERATION_STOP"
+        private const val ACTION_HOLD = "io.github.homestay377.mewaskstock.CHAT_HOLD"
+        private const val ACTION_STATUS = "io.github.homestay377.mewaskstock.CHAT_STATUS"
+        private const val ACTION_RELEASE = "io.github.homestay377.mewaskstock.CHAT_RELEASE"
         private const val EXTRA_CONVERSATION_ID = "conversation_id"
+        private const val EXTRA_STATUS = "status"
         private const val CHANNEL_ID = "chat_generation"
         private const val NOTIFICATION_ID = 9137
 
@@ -120,6 +153,26 @@ class ChatGenerationService : Service() {
                 .setAction(ACTION_STOP)
                 .putExtra(EXTRA_CONVERSATION_ID, conversationId)
             context.startService(intent)
+        }
+
+        /** 让服务按住不放（虚拟屏在用），并把"正在干什么"写到通知上。 */
+        fun hold(context: Context, status: String) {
+            val intent = Intent(context, ChatGenerationService::class.java)
+                .setAction(ACTION_HOLD)
+                .putExtra(EXTRA_STATUS, status)
+            runCatching { ContextCompat.startForegroundService(context, intent) }
+        }
+
+        fun updateStatus(context: Context, status: String) {
+            val intent = Intent(context, ChatGenerationService::class.java)
+                .setAction(ACTION_STATUS)
+                .putExtra(EXTRA_STATUS, status)
+            runCatching { context.startService(intent) }
+        }
+
+        fun release(context: Context) {
+            val intent = Intent(context, ChatGenerationService::class.java).setAction(ACTION_RELEASE)
+            runCatching { context.startService(intent) }
         }
     }
 }
