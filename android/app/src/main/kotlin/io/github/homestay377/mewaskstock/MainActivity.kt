@@ -41,6 +41,10 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MiniPhoneBridge.CHANNEL)
             .setMethodCallHandler(MiniPhoneBridge(applicationContext))
 
+        // 保活 + 悬浮图标：前台服务常驻、通知显示"正在干什么"
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, KeepAliveBridge.CHANNEL)
+            .setMethodCallHandler(KeepAliveBridge(applicationContext))
+
         // 虚拟屏（Shizuku 或无线调试助手，App 在后台屏上跑）
         val bridge = VirtualDisplayBridge.create(applicationContext)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VirtualDisplayBridge.CHANNEL)
