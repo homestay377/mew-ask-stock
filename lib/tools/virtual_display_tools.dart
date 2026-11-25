@@ -32,7 +32,7 @@ class VirtualDisplayDeps {
 }
 
 /// 构造虚拟屏工具集。
-List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps? deps}) {
+List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps? deps, int stallLimit = 6}) {
   if (!enabled) return const [];
   if (!Platform.isAndroid) return const [];
   final d = deps ?? VirtualDisplayDeps();
@@ -251,7 +251,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
         ? '界面已变化'
         : (noProgress >= 2 ? '界面还没变化（连续第 $noProgress 次，可能仍在加载）' : '界面看起来没变（可能没点中，或还在加载）');
 
-    if (noProgress >= 6) {
+    if (noProgress >= stallLimit) {
       // 到这一步就不是"慢"了：六次动作画面都没动，八成是屏没刷新 / 点错位置 / 卡在弹窗上
       final st0 = await d.vd.status();
       sw.stop();
