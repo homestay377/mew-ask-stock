@@ -315,6 +315,93 @@ class ShellDisplayService : IShellDisplay.Stub() {
         }.getOrElse { "__error=${it.javaClass.simpleName}: ${it.message}" }
     }
 
+    override fun moveTask(taskId: Int, displayId: Int): Boolean {
+        if (taskId < 0 || !own(displayId)) return false
+        val ok = runCatching {
+            val atm = Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null)!!
+            val m = atm.javaClass.methods.first { it.name == "moveRootTaskToDisplay" }
+            m.invoke(atm, taskId, displayId)
+            true
+        }.getOrDefault(false)
+        if (ok) return true
+        // 退路：am display move-stack <task> <display>（真机验证过能双向挪）
+        return runCommand("am", "display", "move-stack", taskId.toString(), displayId.toString()) == 0
+    }
+
+    override fun taskOfPackage(packageName: String): Int {
+        return runCatching {
+            val atm = Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null)!!
+            val m = atm.javaClass.methods.first { it.name == "getTasks" && it.parameterTypes.size == 1 }
+            val list = m.invoke(atm, 60) as? List<*> ?: return -1
+            for (t in list) {
+                val task = t ?: continue
+                val top = runCatching { task.javaClass.getMethod("getTopActivity").invoke(task) }.getOrNull()
+                val pkg = (top as? android.content.ComponentName)?.packageName ?: continue
+                if (pkg != packageName) continue
+                val id = runCatching { task.javaClass.getMethod("getTaskId").invoke(task) as Int }.getOrNull()
+                    ?: continue
+                return id
+            }
+            -1
+        }.getOrDefault(-1)
+    }
+
+    override fun injectStroke(displayId: Int, xs: IntArray, ys: IntArray, times: LongArray): Boolean {
+        if (!own(displayId)) return false
+        if (xs.isEmpty() || xs.size != ys.size || xs.size != times.size) return false
+        if (xs.size > STROKE_MAX_POINTS) return false
+        val downTime = SystemClock.uptimeMillis()
+        var ok = true
+        for (i in xs.indices) {
+            val action = when (i) {
+                0 -> MotionEvent.ACTION_DOWN
+                xs.size - 1 -> MotionEvent.ACTION_UP
+                else -> MotionEvent.ACTION_MOVE
+            }
+            val ev = MotionEvent.obtain(
+                downTime,
+                downTime + times[i].coerceIn(0, STROKE_MAX_MS),
+                action,
+                xs[i].toFloat(),
+                ys[i].toFloat(),
+                0,
+            )
+            ev.source = InputDevice.SOURCE_TOUCHSCREEN
+            try {
+                // 按时间轴送：先睡到该点的时间，再投递
+                val wait = times[i] - if (i == 0) 0L else times[i - 1]
+                if (wait > 0) SystemClock.sleep(wait.coerceAtLeast(1))
+                if (!inject(ev, displayId, waitForFinish = false)) ok = false
+            } finally {
+                ev.recycle()
+            }
+            if (!ok) break
+        }
+        return ok
+    }
+
+    override fun injectScroll(displayId: Int, x: Int, y: Int, hScroll: Int, vScroll: Int): Boolean {
+        if (!own(displayId)) return false
+        val now = SystemClock.uptimeMillis()
+        val ev = MotionEvent.obtain(now, now, MotionEvent.ACTION_SCROLL, x.toFloat(), y.toFloat(), 0)
+        // setAxisValue 不在 SDK 公开面里，用反射设；设不上就当成普通滚动（上层还有 swipe 兜底）
+        runCatching {
+            val m = MotionEvent::class.java.getMethod(
+                "setAxisValue",
+                Int::class.javaPrimitiveType,
+                Float::class.javaPrimitiveType,
+            )
+            m.invoke(ev, MotionEvent.AXIS_HSCROLL, hScroll.toFloat())
+            m.invoke(ev, MotionEvent.AXIS_VSCROLL, vScroll.toFloat())
+        }
+        ev.source = InputDevice.SOURCE_TOUCHSCREEN
+        return try {
+            inject(ev, displayId, waitForFinish = false)
+        } finally {
+            ev.recycle()
+        }
+    }
+
     override fun identity(): IntArray = intArrayOf(Process.myUid(), Process.myPid())
 
     // ---------- 内部 ----------
@@ -399,6 +486,10 @@ class ShellDisplayService : IShellDisplay.Stub() {
 
         /** execShell 输出的上限，防止一条命令把 binder 事务撑爆。 */
         const val MAX_COMMAND_OUTPUT = 64 * 1024
+
+        /** 一笔最多多少个点、最长多少毫秒（按 Mika 的 injectStroke 口径）。 */
+        const val STROKE_MAX_POINTS = 1024
+        const val STROKE_MAX_MS = 10_000L
         const val SWIPE_STEPS = 14
         const val IME_LOCAL = 0
         const val INJECT_ASYNC = 0
