@@ -55,6 +55,16 @@ class ShizukuShellUserService private constructor(dummy: Boolean) : IShellDispla
 
     override fun execShell(command: String): String = delegate.execShell(command)
 
+    override fun moveTask(taskId: Int, displayId: Int): Boolean = delegate.moveTask(taskId, displayId)
+
+    override fun taskOfPackage(packageName: String): Int = delegate.taskOfPackage(packageName)
+
+    override fun injectStroke(displayId: Int, xs: IntArray, ys: IntArray, times: LongArray): Boolean =
+        delegate.injectStroke(displayId, xs, ys, times)
+
+    override fun injectScroll(displayId: Int, x: Int, y: Int, hScroll: Int, vScroll: Int): Boolean =
+        delegate.injectScroll(displayId, x, y, hScroll, vScroll)
+
     override fun identity(): IntArray = delegate.identity()
 
     override fun lastError(): String? = delegate.lastError()
