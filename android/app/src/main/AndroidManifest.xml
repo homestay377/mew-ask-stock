@@ -10,6 +10,8 @@
     <!-- Keep active response streams alive while the app is backgrounded. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 虚拟屏悬浮图标：不自己授权，用 shell 身份 appops 打开 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Saving generated images to the gallery on Android 9 and below only. -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
