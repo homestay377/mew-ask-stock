@@ -17,6 +17,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/paths.dart';
+import '../../stock/chan_cache.dart';
 import '../../stock/chanlun.dart';
 import '../../stock/chart_context.dart';
 import '../../stock/data_quality.dart';
@@ -427,7 +428,9 @@ class _StockChartPanelState extends State<StockChartPanel> {
         // ★ 计算可能耗时（几百毫秒），这期间用户可能已经切股。
         //   不校验就会用旧数据的根数重置视口，把新股票的视口弄乱。
         if (!mounted || _lastKey != key) return;
-        ch = Chanlun.analyze(s.bars, formula);
+        // 走共享缓存：和 analyze_chan 用的是同一份结果，
+        // 避免「图上画的中枢」和「模型说的中枢」是两次独立计算。
+        ch = analyzeShared(s.bars, formula, symbol: s.symbol, name: s.name);
       }
       if (!mounted || _lastKey != key) return;
       _viewport.reset(s.bars.length);
@@ -466,7 +469,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
     if (_chan == null) {
       _formula().then((f) {
         if (!mounted) return;
-        setState(() => _chan = Chanlun.analyze(s.bars, f));
+        setState(() => _chan = analyzeShared(s.bars, f, symbol: s.symbol, name: s.name));
       });
     }
   }
@@ -542,7 +545,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
     if (!mounted || _lastKey != key) return;
     ChanResult? ch;
     if (widget.state.showChan) {
-      ch = Chanlun.analyze(fresh.bars, await _formula());
+      ch = analyzeShared(fresh.bars, await _formula(), symbol: fresh.symbol, name: fresh.name);
     }
     if (!mounted || _lastKey != key) return;
     setState(() {

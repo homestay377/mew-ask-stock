@@ -4,6 +4,7 @@
 /// 不需要先切面板、也不需要读屏幕。
 library;
 
+import 'chan_cache.dart';
 import 'chanlun.dart';
 import 'data_quality.dart';
 import 'numbers.dart';
@@ -108,7 +109,7 @@ class StockAnalyzer {
   }) async {
     final sw = Stopwatch()..start();
     final series = await source.kline(symbol, period: period, count: count);
-    final chan = Chanlun.analyze(series.bars, formula, viewStart: viewStart, symbol: series.symbol, name: series.name);
+    final chan = analyzeShared(series.bars, formula, viewStart: viewStart, symbol: series.symbol, name: series.name);
     sw.stop();
     return StockAnalysis(
       series: series,

@@ -319,7 +319,9 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           final rawCount = args['count'];
           final count = rawCount is int ? rawCount.clamp(1, chanBarCount) : 60;
 
-          final s = await source.kline(symbol, period: period, count: count);
+          // 走缓存：面板刚拉过同一只的话直接命中，不再重复打三级降级。
+          // 缓存给的可能是 1–60 秒内的数据，quality/clock 会如实标出来。
+          final s = await source.klineCached(symbol, period: period, count: count);
           final bars = s.bars.length > 30 ? s.bars.sublist(s.bars.length - 30) : s.bars;
 
           final closes = s.bars.map((b) => b.c).toList();
@@ -833,7 +835,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           if (raw is! List || raw.isEmpty) return jsonEncode({'error': 'shapes 不能为空'});
 
           // 用真实 K 线确定有效索引范围，越界的坐标直接拒绝（避免画出乱线）
-          final series = await source.kline(symbol, period: period);
+          // 同 stock_kline：走缓存，面板已加载过的标的直接命中。
+          final series = await source.klineCached(symbol, period: period);
           final total = series.bars.length;
           // 读的时候把「这组线属于哪一天」一起带上：跨日会整组作废
           final barDate = barDateOf(series.last.t);
