@@ -2,7 +2,7 @@
 // CI 里由 test/tool_output_clip_test.dart 做正式门禁，两边用例保持一致。
 // ignore_for_file: avoid_print, avoid_relative_lib_imports
 
-import '../mew-ask-stock/lib/ai/tool_output_clip.dart';
+import '../lib/ai/tool_output_clip.dart';
 
 int _fail = 0;
 
