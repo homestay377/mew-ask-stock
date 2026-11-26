@@ -36,6 +36,14 @@ class NetConfig {
   static Map<String, String> providerProxies = {};
   static Duration connectTimeout = const Duration(seconds: 30);
   static Duration responseTimeout = const Duration(seconds: 120);
+
+  /// 流式输出时两个数据块之间的最长静默。
+  ///
+  /// 和 [responseTimeout] 分开：那个管「等不到响应头」，这个管「响应头到了、
+  /// 但模型迟迟不吐字」。深度思考模型经常先沉默一两分钟再开始输出，
+  /// 用 120 秒去卡它，正常的思考会被当成卡死，客户端直接抛
+  /// `Timed out waiting for response data`，用户看到的就是「没回答」。
+  static Duration streamIdleTimeout = const Duration(minutes: 10);
 }
 
 /// Keeps streamed request bodies intact while combining caller cancellation
@@ -142,6 +150,9 @@ class Net {
     Duration? timeout,
   }) async {
     final limit = timeout ?? NetConfig.responseTimeout;
+    // 显式传了 timeout 的调用方（比如行情接口的 12 秒）两个阶段都用它；
+    // 没传的走各自的默认：等响应头 120 秒，流式静默可到 10 分钟。
+    final idle = timeout ?? NetConfig.streamIdleTimeout;
     final abort = CancelToken();
     final callerAbort = req is http.Abortable ? req.abortTrigger : null;
     final request = _AbortableRequest(
@@ -160,9 +171,9 @@ class Net {
           );
       // Reset the timeout whenever a chunk arrives so long responses can stream.
       final stream = res.stream.timeout(
-        limit,
+        idle,
         onTimeout: (sink) {
-          sink.addError(TimeoutException('Timed out waiting for response data', limit));
+          sink.addError(TimeoutException('Timed out waiting for response data', idle));
           abort.cancel();
           sink.close();
         },

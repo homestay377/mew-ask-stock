@@ -101,7 +101,11 @@ ${subAgentCatalog(agents)}''',
       required: ['tool_title', 'assignments'],
     ),
     promptHint:
-        '你可以用 `dispatch_subagents` 把互相独立的工作（不同股票、不同角度、先取数再审查）交给子智能体，'
+        '**默认自己动手。** 只有「确实互相独立、能并行推进」的活才分派：'
+        '比如同时看 3 只不同股票、同时查基本面和结构、一边取数一边做资料研究。'
+        '看一只股票的走势、回答一个问题、用户说「直接分析」时，不要分派——'
+        '你自己有 stock_kline / analyze_chan / stock_levels，直接调比派出去快得多；'
+        '子智能体的工具集是主工具的副本，缺什么它们也一样缺。'
         '同一次调用里放多条让它们同时开工。子智能体的返回是素材：最终回答仍由你写，数字照抄、结论由你判断并整合。',
     execute: (args) async {
       final ctx = currentToolRun();

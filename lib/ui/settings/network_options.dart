@@ -73,6 +73,17 @@ class NetworkOptions extends StatelessWidget {
               max: 1800,
               onChanged: (v) => update((n) => n.copyWith(responseTimeoutSeconds: v)),
             ),
+            number(
+              title: t('流式静默超时', 'Stream idle timeout'),
+              description: t(
+                '已经开始输出后，两段内容之间最多等多久；深度思考模型会先沉默一两分钟，调大它才不会把正常思考当成卡死',
+                'How long to wait between output chunks once streaming has started; raise it for reasoning models that pause before speaking',
+              ),
+              value: network.streamIdleSeconds,
+              min: 60,
+              max: 3600,
+              onChanged: (v) => update((n) => n.copyWith(streamIdleSeconds: v)),
+            ),
           ],
         ),
         SettingsGroup(

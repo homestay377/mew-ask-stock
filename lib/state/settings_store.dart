@@ -139,12 +139,14 @@ class SettingsStore extends ChangeNotifier {
         NetConfig.proxy != defaultProxy ||
         NetConfig.connectTimeout != Duration(seconds: _settings.network.connectTimeoutSeconds) ||
         NetConfig.responseTimeout != Duration(seconds: _settings.network.responseTimeoutSeconds) ||
+        NetConfig.streamIdleTimeout != Duration(seconds: _settings.network.streamIdleSeconds) ||
         !_sameMap(NetConfig.providerProxies, providerProxies);
     NetConfig.userAgent = _settings.userAgent;
     NetConfig.proxy = defaultProxy;
     NetConfig.providerProxies = providerProxies;
     NetConfig.connectTimeout = Duration(seconds: _settings.network.connectTimeoutSeconds);
     NetConfig.responseTimeout = Duration(seconds: _settings.network.responseTimeoutSeconds);
+    NetConfig.streamIdleTimeout = Duration(seconds: _settings.network.streamIdleSeconds);
     if (changed) Net.reconfigure();
   }
 

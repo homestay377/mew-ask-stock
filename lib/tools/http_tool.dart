@@ -114,7 +114,10 @@ AppTool buildHttpTool() {
     ),
     promptHint:
         '需要联网时直接调用 `$httpToolName`：取网页、调行情/公开 API、下载文件都走它。'
-        '拿不到就明确说拿不到，不要凭印象编造数据。',
+        '但**行情数据不要用 `$httpToolName` 裸抓**：报价用 stock_quote，K 线用 stock_kline，'
+        '结构用 analyze_chan / stock_levels，多级别一次拿完；拿不到就直接说拿不到，'
+        '不要自己拼接口地址去凑数据——那样既有字段猜错的风险，又把一轮对话的时间全花在取数上。'
+        '如果这几个股票工具不在工具列表里，说明助手设置里的「股票分析」没打开，告诉用户去打开，不要退化成裸抓。',
     execute: (args) async {
       final raw = asStr(args['url']).trim();
       final uri = Uri.tryParse(raw);
