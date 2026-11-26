@@ -1075,8 +1075,16 @@ class StockSource {
 
     final notes = <String>[];
     if (val == null || val.isEmpty) notes.add('估值数据拿不到（涨幅/停牌原因，或该标的不适用）');
-    if (reports.isEmpty) notes.add('没有财报数据（ETF、指数、或上市不足一期）');
-    if (boards.isEmpty) notes.add('近期没有上龙虎榜记录');
+    // 区分「接口挂了」和「真没有」：原来两者都写成「没有财报数据」，
+    // 东财字段一改就会把接口故障说成「ETF/指数没有财报」。
+    if (reports.isEmpty) {
+      final err = _lastReportsError;
+      notes.add(err == null ? '没有财报数据（ETF、指数、或上市不足一期）' : '财报接口失败：$err');
+    }
+    if (boards.isEmpty) {
+      final err = _lastBoardsError;
+      notes.add(err == null ? '近期没有上龙虎榜记录' : '龙虎榜接口失败：$err');
+    }
 
     // 名称优先用财报里的，其次估值接口
     var name = code;
@@ -1120,7 +1128,15 @@ class StockSource {
   }
 
   /// 财报。只取报告期口径的字段。
+  /// 最近一次拉财报失败的原因。null = 没失败（或还没拉过）。
+  /// 用来把「接口挂了」和「这只标的本来就没有财报」区分开。
+  String? _lastReportsError;
+
+  /// 最近一次拉龙虎榜失败的原因。
+  String? _lastBoardsError;
+
   Future<List<Report>> _reports(String code) async {
+    _lastReportsError = null;
     try {
       // ★ 不能带 sortColumns=REPORT_DATE：该列不存在，接口会报 9501。
       //   默认返回已经按报告期倒序。
@@ -1155,13 +1171,17 @@ class StockSource {
         );
       }
       return out;
-    } catch (_) {
+    } catch (e) {
+      // 不要静默：东财字段名一改，这里就返回空列表，模型会把它转述成
+      // 「没有财报数据（ETF、指数、或上市不足一期）」——归因完全错了。
+      _lastReportsError = '$e';
       return const [];
     }
   }
 
   /// 龙虎榜。
   Future<List<BillBoard>> _boards(String code) async {
+    _lastBoardsError = null;
     try {
       final body = await _text(
         'https://datacenter-web.eastmoney.com/api/data/v1/get'
@@ -1198,7 +1218,10 @@ class StockSource {
         );
       }
       return out;
-    } catch (_) {
+    } catch (e) {
+      // 不要静默：东财字段名一改，这里就返回空列表，模型会把它转述成
+      // 「没有财报数据（ETF、指数、或上市不足一期）」——归因完全错了。
+      _lastBoardsError = '$e';
       return const [];
     }
   }

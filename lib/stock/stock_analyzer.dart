@@ -101,14 +101,21 @@ class StockAnalyzer {
   /// 拉 K 线并跑缠论。
   ///
   /// [viewStart] 只裁剪显示范围，不影响计算。传 0 表示不裁剪。
+  ///
+  /// [useCache] 为 true 时走 [StockSource.klineCached]：面板刚加载过同一只就
+  /// 直接命中，不再重打三级降级。默认 false 保持原行为（一次性分析要最新数据），
+  /// 由 AI 工具显式打开——它本来就是和面板看同一张图。
   Future<StockAnalysis> analyze(
     String symbol, {
     String period = 'day',
     int count = chanBarCount,
     int viewStart = 0,
+    bool useCache = false,
   }) async {
     final sw = Stopwatch()..start();
-    final series = await source.kline(symbol, period: period, count: count);
+    final series = useCache
+        ? await source.klineCached(symbol, period: period, count: count)
+        : await source.kline(symbol, period: period, count: count);
     final chan = analyzeShared(series.bars, formula, viewStart: viewStart, symbol: series.symbol, name: series.name);
     sw.stop();
     return StockAnalysis(

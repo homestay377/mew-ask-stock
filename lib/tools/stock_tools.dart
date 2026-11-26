@@ -406,7 +406,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           if (!pr.isOk) return jsonEncode({'error': pr.error});
           final period = pr.value!;
           final az = await analyzer();
-          final r = await az.analyze(symbol, period: period);
+          // 走缓存：面板刚分析过同一只就直接命中，两边算的是同一份结果。
+          final r = await az.analyze(symbol, period: period, useCache: true);
           return jsonEncode({'summary': r.summary, 'detail': r.toJson()});
         } catch (e) {
           return jsonEncode({'error': '$e'});
@@ -502,7 +503,9 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           final rawPeriods = '${args['periods'] ?? 'week,day,m60,m30,m15'}';
           final periods = rawPeriods.split(RegExp(r'[,，\s]+')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
           final barsRaw = args['bars'];
-          final bars = barsRaw is int ? barsRaw.clamp(100, chanBarCount) : 400;
+          // 默认取满 chanBarCount(640)：和面板、analyze_chan 用同一份缓存。
+          // 以前是 400，等于每次多打一遍网络还把缓存拆成两份。
+          final bars = barsRaw is int ? barsRaw.clamp(100, chanBarCount) : chanBarCount;
 
           final az = await analyzer();
 
@@ -517,7 +520,7 @@ List<AppTool> buildStockTools({bool enabled = true}) {
               periods,
               3,
               (String p) => az
-                  .analyze(sym, period: p, count: bars)
+                  .analyze(sym, period: p, count: bars, useCache: true)
                   .then<Map<String, dynamic>>(
                     (r) => {
                       'period': StockAnalyzer.periodName(p),
@@ -742,7 +745,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
                 Future.wait([
                   source.quoteCached(sym).then<Quote?>((q) => q).catchError((Object _) => null),
                   az
-                      .analyze(sym, period: period, count: 400)
+                      // 扫描是粗筛：400 根够用，且走缓存不会因为扫 20 只就断网。
+                      .analyze(sym, period: period, count: 400, useCache: true)
                       .then<StockAnalysis?>((r) => r)
                       .catchError((Object _) => null),
                 ]).then((pair) {
