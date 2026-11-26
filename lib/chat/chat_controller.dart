@@ -32,6 +32,11 @@ import '../tools/virtual_display_tools.dart';
 import '../tools/mcp.dart';
 import '../tools/stock_tools.dart';
 import '../tools/tool.dart';
+import '../tools/workspace_tools.dart';
+import 'accumulator.dart';
+import 'auto_compression.dart';
+import 'helpers.dart';
+import 'prompt_builder.dart';
 
 /// 取数类工具：多源降级 + 多周期并发，最坏耗时会明显超过 3 分钟。
 /// 与 `sub_agent_runner.dart` 的 `timeoutForTool` 保持同一口径，
@@ -47,11 +52,6 @@ const kSlowDataTools = <String>{
   'chart_annotate',
   'http_request',
 };
-import '../tools/workspace_tools.dart';
-import 'accumulator.dart';
-import 'auto_compression.dart';
-import 'helpers.dart';
-import 'prompt_builder.dart';
 
 /// Called by the UI to resolve a pending tool approval.
 typedef ApprovalDecision = ({String callId, bool approved, String? reason});
