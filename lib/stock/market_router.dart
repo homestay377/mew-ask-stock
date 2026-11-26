@@ -188,7 +188,7 @@ class MarketRouter {
   ///
   /// 返回 null 表示这不是聚合类问题，该怎么答就怎么答。
   static String? aggregateTopic(String? text) {
-    final s = '${text ?? ''}';
+    final s = text ?? '';
     if (s.trim().isEmpty) return null;
     if (_hit(s, ['涨停', '跌停', '连板', '天梯', '晋级', '炸板', '封板'])) return 'limit_up';
     if (_hit(s, ['板块', '行业', '概念', '题材', '轮动'])) return 'sector';
