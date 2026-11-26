@@ -251,7 +251,7 @@ class OpenAiChatProvider extends AiProvider with OpenAiCommon {
       }
       out.add(msg);
       for (final c in calls) {
-        out.add({'role': 'tool', 'tool_call_id': c.callId, 'content': c.output ?? ''});
+        out.add({'role': 'tool', 'tool_call_id': c.callId, 'content': toolOutputForModel(c.output)});
       }
       text.clear();
       reasoning.clear();

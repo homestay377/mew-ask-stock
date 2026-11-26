@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import '../core/util.dart';
 
+export 'tool_output_clip.dart';
+
 enum Role { system, user, assistant, tool }
 
 enum ToolApproval { auto, pending, approved, denied }

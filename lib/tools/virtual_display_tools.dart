@@ -289,15 +289,99 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
     return '$what 已下发（$cost，$changeNote）。\n\n$text';
   }
 
+  /// 只在屏幕上找匹配项（原 vd_find 的逻辑）。
+  ///
+  /// 拆出来是因为它其实只是 vd_observe 的一个参数：给了文字就定向找，
+  /// 不给就整屏 dump。以前拆成两个工具，模型要在「看屏」和「找元素」之间选，
+  /// 实际是同一个动作。
+  Future<String> matchInScreen(String q) async {
+    final query = q.trim().toLowerCase();
+    if (query.isEmpty) return '需要 text。';
+    final st = await d.vd.status();
+    final snap = await d.phone.observe(displayId: st.displayId);
+    final all = (snap['elements'] as List?) ?? const [];
+    final hits = snap['ok'] == true
+        ? all.where((e) {
+            final m = (e as Map);
+            return '${m['name'] ?? ''}'.toLowerCase().contains(query) ||
+                '${m['resourceId'] ?? ''}'.toLowerCase().contains(query);
+          }).toList()
+        : const [];
+
+    // 无障碍树里有就优先用它：带 ref，可点、可输入。
+    if (hits.isNotEmpty) {
+      final buf = StringBuffer('匹配 ${hits.length} 个：');
+      for (final e in hits.take(20)) {
+        final m = (e as Map);
+        final c = (m['center'] as List?) ?? const [0, 0];
+        buf.write(
+          '\n${m['ref']} ${m['role']}「${m['name']}」@${c[0]},${c[1]}'
+          '${m['clickable'] == true ? ' [可点]' : ''}${m['editable'] == true ? ' [可输入]' : ''}',
+        );
+      }
+      return buf.toString();
+    }
+
+    // 退到 OCR：没开无障碍时这是唯一能定位文字的路，结果是坐标。
+    final lines = await d.vd.ocr();
+    final ocrHits = lines.where((l) => '${l['text'] ?? ''}'.toLowerCase().contains(query)).toList();
+    if (ocrHits.isNotEmpty) {
+      final buf = StringBuffer('无障碍树没匹配到，但屏幕文字里找到 ${ocrHits.length} 行（OCR，点用坐标）：');
+      for (final l in ocrHits.take(20)) {
+        final c = (l['center'] as List?) ?? const [0, 0];
+        buf.write('\n「${l['text']}」@${c[0]},${c[1]}');
+      }
+      buf.write('\n（要输入文字得先开无障碍服务，OCR 只能点不能打字）');
+      return buf.toString();
+    }
+
+    final total = snap['ok'] == true ? '共 ${all.length} 个元素' : '无障碍没连';
+    return '虚拟屏上没有匹配「$q」的内容（$total / ${lines.length} 行文字）。可能在下面，先 vd_scroll 再看。';
+  }
+
+  /// 列出可打开的 App（原 vd_apps 的逻辑），合进 vd_open 的 list 参数。
+  Future<String> appsText({String kw = '', bool all = false}) async {
+    final r = await d.phone.listApps();
+    if (r['ok'] != true) return '读不到 App 列表：${r['error']}';
+    var apps = ((r['apps'] as List?) ?? const []).map((e) => (e as Map)).toList();
+    if (kw.isNotEmpty) {
+      final q = kw.toLowerCase();
+      apps = apps
+          .where((a) => '${a['label']}'.toLowerCase().contains(q) || '${a['package']}'.toLowerCase().contains(q))
+          .toList();
+    } else if (!all) {
+      apps = apps.where((a) => _looksLikeMarket('${a['label']}')).toList();
+    }
+    if (apps.isEmpty) return kw.isEmpty ? '没找到行情相关的 App（可以用 all=true 看全部）。' : '没有匹配「$kw」的 App。';
+    final buf = StringBuffer('找到 ${apps.length} 个：');
+    for (final a in apps.take(40)) {
+      buf.write('\n- ${a['label']}（${a['package']}）');
+    }
+    if (apps.length > 40) buf.write('\n…还有 ${apps.length - 40} 个，用 keyword 收窄');
+    return buf.toString();
+  }
+
   return [
     AppTool(
       name: 'vd_status',
       displayName: '虚拟屏状态',
       description:
           '查看虚拟屏现在能不能用：Shizuku 有没有跑、有没有授权、屏建没建起来。'
-          '别的情况（打不开 App、读不到界面）先用它确认前提，不要瞎猜。',
-      parameters: objectSchema({}),
-      execute: (_) async {
+          '别的情况（打不开 App、读不到界面）先用它确认前提，不要瞎猜。\n'
+          '正常情况下不需要重建屏：任意 vd_* 工具都会自己建。只有屏卡住、画面不刷新、'
+          '被系统回收之后，才用 rebuild=true 强制重建。',
+      parameters: objectSchema({
+        'rebuild': strProp('传 "true" 强制重建虚拟屏（排障用）', enumValues: ['true', 'false']),
+      }),
+      execute: (args) async {
+        if (args['rebuild'] == 'true' || args['rebuild'] == true) {
+          await d.vd.releaseDisplay();
+          final off = await ensureReady(force: true);
+          if (off != null) return off;
+          final rebuilt = await d.vd.status();
+          return '虚拟屏已重建（display=${rebuilt.displayId}）。'
+              '${rebuilt.accessibility ? '' : '注意：无障碍没连，只能读 OCR 文字，不能按 ref 输入。'}';
+        }
         final st = await d.vd.status();
         final buf = StringBuffer(st.describe());
         if (!st.usable) {
@@ -309,29 +393,18 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
       },
     ),
     AppTool(
-      name: 'vd_prepare',
-      displayName: '重建虚拟屏（排障）',
-      description:
-          '正常情况**不需要调用**：其它 vd_* 工具都会自动建屏。'
-          '只在屏卡住、画面不刷新、被系统回收后想强制重建时用它。',
-      parameters: objectSchema({}),
-      execute: (_) async {
-        await d.vd.releaseDisplay();
-        final off = await ensureReady(force: true);
-        if (off != null) return off;
-        final st = await d.vd.status();
-        return '虚拟屏已重建（display=${st.displayId}）。'
-            '${st.accessibility ? '' : '注意：无障碍没连，只能读 OCR 文字，不能按 ref 输入。'}';
-      },
-    ),
-    AppTool(
       name: 'vd_open',
       displayName: '在虚拟屏打开 App',
       description:
           '在虚拟屏上打开手机里的 App，用中文名或包名都可以'
           '（如「同花顺」「雪球」「com.hexin.plat.android」）。会自动准备好虚拟屏。'
-          '打开后自动读一次屏告诉你看到了什么。',
-      parameters: objectSchema({'app': strProp('App 名字或包名，例如 同花顺 / 雪球 / com.xueqiu.android')}, required: ['app']),
+          '打开后自动读一次屏告诉你看到了什么。\n'
+          '不知道 App 叫什么时给 list="true"：会列出手机里的行情/股票类 App（给 keyword 可以按名字过滤）。',
+      parameters: objectSchema({
+        'app': strProp('App 名字或包名，例如 同花顺 / 雪球 / com.xueqiu.android'),
+        'list': strProp('传 "true" 只列出可打开的 App，不打开任何东西', enumValues: ['true', 'false']),
+        'keyword': strProp('配合 list 用：按名字或包名过滤'),
+      }),
       promptHint:
           '这块虚拟屏没有系统导航栏（不显示手势条/三大金刚），回上一页一律用 vd_back，别去找按钮。'
           '⚠ 用户说「K 线面板」「看盘面板」「打开图表」时，指的是这个 App **自带的**图表，不是你正在操作的虚拟屏：'
@@ -340,8 +413,13 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
           '需要看接口拿不到的行情（行业资金流、龙虎榜席位、F10 里没 API 的字段）时，'
           '用 vd_open 打开对应 App 读界面；能走 stock_kline / analyze_chan / stock_levels 的，优先走它们，不要开 App。',
       execute: (args) async {
+        if (args['list'] == 'true' || args['list'] == true) {
+          final off = await ensureReady();
+          if (off != null) return off;
+          return appsText(kw: '${args['keyword'] ?? ''}'.trim());
+        }
         final raw = '${args['app'] ?? ''}'.trim();
-        if (raw.isEmpty) return '需要给出 app（名字或包名）。';
+        if (raw.isEmpty) return '需要给出 app（名字或包名）；只想看装了哪些就用 list="true"。';
         final off = await ensureReady();
         if (off != null) return '虚拟屏没准备好，打不开 App。$off';
         // 名字 → 包名：让原生用 PackageManager 查（和模型自己猜包名比，这个准）
@@ -356,7 +434,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
             final names = installed.take(12).map((e) => '${(e as Map)['label']}(${e['package']})').join('、');
             return '没找到「$raw」。手机上相近的有：$names';
           }
-          return '没找到「$raw」，也没找到相近的 App。可以先 mini_vd_apps 看看装了什么。';
+          return '没找到「$raw」，也没找到相近的 App。可以用 vd_open 的 list="true" 看看装了什么。';
         }
         final best = (matches.first as Map);
         final pkg = '${best['package']}';
@@ -402,103 +480,24 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
       },
     ),
     AppTool(
-      name: 'vd_apps',
-      displayName: '列出已装 App',
-      description:
-          '列出手机里能打开的 App（名字 + 包名）。不确定某个 App 叫什么时用它，'
-          '比猜包名靠谱。默认只列行情/股票相关的，可以给 keyword 过滤。',
-      parameters: objectSchema({
-        'keyword': strProp('按名字或包名过滤，例如 股票 / 同花顺'),
-        'all': strProp('传 "true" 列出全部（可能上百个）', enumValues: ['true', 'false']),
-      }),
-      execute: (args) async {
-        final kw = '${args['keyword'] ?? ''}'.trim();
-        final all = args['all'] == 'true' || args['all'] == true;
-        final r = await d.phone.listApps();
-        if (r['ok'] != true) return '读不到 App 列表：${r['error']}';
-        var apps = ((r['apps'] as List?) ?? const []).map((e) => (e as Map)).toList();
-        if (kw.isNotEmpty) {
-          final q = kw.toLowerCase();
-          apps = apps
-              .where((a) => '${a['label']}'.toLowerCase().contains(q) || '${a['package']}'.toLowerCase().contains(q))
-              .toList();
-        } else if (!all) {
-          apps = apps.where((a) => _looksLikeMarket('${a['label']}')).toList();
-        }
-        if (apps.isEmpty) return kw.isEmpty ? '没找到行情相关的 App（可以用 all=true 看全部）。' : '没有匹配「$kw」的 App。';
-        final buf = StringBuffer('找到 ${apps.length} 个：');
-        for (final a in apps.take(40)) {
-          buf.write('\n- ${a['label']}（${a['package']}）');
-        }
-        return buf.toString();
-      },
-    ),
-    AppTool(
       name: 'vd_observe',
       displayName: '看虚拟屏',
       description:
           '读虚拟屏当前界面：元素（文字、按钮、输入框）与坐标，每条带 ref。'
           '没开无障碍时自动退到本机 OCR，给「文字 + 坐标」。'
-          '会自动建屏，不用先调准备。ref 只在这次读屏内有效，点击后要重新 observe。',
-      parameters: objectSchema({'maxElements': intProp('最多返回多少个元素，默认 $kVirtualMaxElements')}),
+          '会自动建屏，不用先调准备。ref 只在这次读屏内有效，点击后要重新 observe。\n'
+          '给了 text 就只在屏幕里找包含它的元素——长列表（行情、公告、F10）用这个，比整屏 dump 省得多。',
+      parameters: objectSchema({
+        'maxElements': intProp('最多返回多少个元素，默认 $kVirtualMaxElements'),
+        'text': strProp('只找包含这段文字的元素，例如「涨停」「换手率」「F10」'),
+      }),
       execute: (args) async {
         final off = await ensureReady();
         if (off != null) return off;
+        final q = '${args['text'] ?? ''}'.trim();
+        if (q.isNotEmpty) return matchInScreen(q);
         final n = (args['maxElements'] as num?)?.toInt() ?? kVirtualMaxElements;
         return readScreen(maxElements: n, withImage: true, retryEmpty: true);
-      },
-    ),
-    AppTool(
-      name: 'vd_find',
-      displayName: '在虚拟屏找元素',
-      description: '在虚拟屏上按文字查元素，返回 ref。比 vd_observe 省 token，适合长列表（行情列表、公告、F10）。',
-      parameters: objectSchema({'text': strProp('要匹配的文字')}, required: ['text']),
-      execute: (args) async {
-        final off = await ensureReady();
-        if (off != null) return off;
-        final st = await d.vd.status();
-        final q = '${args['text'] ?? ''}'.trim().toLowerCase();
-        if (q.isEmpty) return '需要 text。';
-        final snap = await d.phone.observe(displayId: st.displayId);
-        final all = (snap['elements'] as List?) ?? const [];
-        final hits = snap['ok'] == true
-            ? all.where((e) {
-                final m = (e as Map);
-                return '${m['name'] ?? ''}'.toLowerCase().contains(q) ||
-                    '${m['resourceId'] ?? ''}'.toLowerCase().contains(q);
-              }).toList()
-            : const [];
-
-        // 无障碍树里有就优先用它：带 ref，可点、可输入。
-        if (hits.isNotEmpty) {
-          final buf = StringBuffer('匹配 ${hits.length} 个：');
-          for (final e in hits.take(20)) {
-            final m = (e as Map);
-            final c = (m['center'] as List?) ?? const [0, 0];
-            buf.write(
-              '\n${m['ref']} ${m['role']}「${m['name']}」@${c[0]},${c[1]}'
-              '${m['clickable'] == true ? ' [可点]' : ''}${m['editable'] == true ? ' [可输入]' : ''}',
-            );
-          }
-          return buf.toString();
-        }
-
-        // 退到 OCR：没开无障碍时这是唯一能定位文字的路，结果是坐标。
-        final lines = await d.vd.ocr();
-        final ocrHits = lines.where((l) => '${l['text'] ?? ''}'.toLowerCase().contains(q)).toList();
-        if (ocrHits.isNotEmpty) {
-          final buf = StringBuffer('无障碍树没匹配到，但屏幕文字里找到 ${ocrHits.length} 行（OCR，点用坐标）：');
-          for (final l in ocrHits.take(20)) {
-            final c = (l['center'] as List?) ?? const [0, 0];
-            buf.write('\n「${l['text']}」@${c[0]},${c[1]}');
-          }
-          buf.write('\n（要输入文字得先开无障碍服务，OCR 只能点不能打字）');
-          return buf.toString();
-        }
-
-        final total = snap['ok'] == true ? '共 ${all.length} 个元素' : '无障碍没连';
-        return '虚拟屏上没有匹配「${args['text']}」的内容（$total / ${lines.length} 行文字）。'
-            '可能在下面，先 vd_scroll 再看。';
       },
     ),
     AppTool(
@@ -834,7 +833,7 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
             final names = installed.take(12).map((e) => '${(e as Map)['label']}(${e['package']})').join('、');
             return '没找到「$wanted」。手机上相近的有：$names';
           }
-          return '没找到「$wanted」。先 vd_apps 看看装了什么。';
+          return '没找到「$wanted」。给 vd_open 传 list="true" 看看装了什么。';
         }
 
         final best = matches.first as Map;

@@ -317,11 +317,12 @@ class GoogleProvider extends AiProvider {
               'functionCall': {'name': part.name, 'args': part.inputJson},
               if (s is String) 'thoughtSignature': s,
             });
-            final parsed = tryJsonDecode(part.output ?? '');
+            final clipped = toolOutputForModel(part.output);
+            final parsed = tryJsonDecode(clipped);
             responses.add({
               'functionResponse': {
                 'name': part.name,
-                'response': parsed is Map ? parsed : {'result': part.output ?? ''},
+                'response': parsed is Map ? parsed : {'result': clipped},
               },
             });
           default:

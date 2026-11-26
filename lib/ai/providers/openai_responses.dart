@@ -314,7 +314,11 @@ class OpenAiResponsesProvider extends AiProvider with OpenAiCommon {
               'name': part.name,
               'arguments': part.input.isEmpty ? '{}' : part.input,
             });
-            pendingOutputs.add({'type': 'function_call_output', 'call_id': part.callId, 'output': part.output ?? ''});
+            pendingOutputs.add({
+              'type': 'function_call_output',
+              'call_id': part.callId,
+              'output': toolOutputForModel(part.output),
+            });
           default:
             break;
         }

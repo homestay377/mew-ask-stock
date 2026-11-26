@@ -321,7 +321,7 @@ class AnthropicProvider extends AiProvider {
             results.add({
               'type': 'tool_result',
               'tool_use_id': part.callId,
-              'content': part.output ?? '',
+              'content': toolOutputForModel(part.output),
               if (part.isError) 'is_error': true,
             });
           case ServerToolPart():

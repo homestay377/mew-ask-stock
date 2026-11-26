@@ -50,11 +50,9 @@ ShellDisplayService（跑在 shell 身份进程）
 
 | 工具 | 作用 |
 |---|---|
-| `vd_status` | 现在能不能用：Shizuku 跑没跑、授权没授权、屏建没建 |
-| `vd_prepare` | **排障用**：强制重建屏。正常流程不需要它，见下节 |
-| `vd_open` | 打开 App（**中文名或包名都行**，名字→包名由 PackageManager 解析） |
-| `vd_apps` | 列已装 App；默认只列行情相关，可 `all=true` |
-| `vd_observe` / `vd_find` | 读那块的界面（元素 + ref + 坐标；没有无障碍时退到本机 OCR） |
+| `vd_status` | 现在能不能用：Shizuku 跑没跑、授权没授权、屏建没建；`rebuild="true"` 强制重建（排障） |
+| `vd_open` | 打开 App（**中文名或包名都行**，名字→包名由 PackageManager 解析）；`list="true"` 只列已装 App |
+| `vd_observe` | 读那块的界面（元素 + ref + 坐标；没有无障碍时退到本机 OCR）；给 `text` 就只找匹配项 |
 | `vd_tap` | 点：`ref` / `text`（自动在无障碍树和 OCR 里找）/ `x,y` 三种给法 |
 | `vd_scroll` / `vd_type` / `vd_back` | 滚、输入（需 ref）、返回 |
 
@@ -108,7 +106,7 @@ Shizuku 状态机（`ShizukuChannel`）：`not_installed / not_running / need_pe
 ## 8. 排查
 
 1. `vd_status`：先确认 Shizuku 是 `ready`；
-2. `vd_prepare`：确认 `display.phase == ready`；
+2. `vd_status(rebuild="true")`：确认 `display.phase == ready`；
 3. 打开 App 后 `vd_observe` 若有 `displayId` 但没元素：可能 App 还没画完，等 1–2 秒重试；
 4. 坐标全偏：检查 `setWindowingMode` 是否成功（少数系统会拒绝，退 `wm` 命令也在日志里）。
 
