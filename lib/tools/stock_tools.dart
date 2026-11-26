@@ -83,6 +83,28 @@ String? routeAway(String symbol) {
   });
 }
 
+/// 问个股时先把面板切过去。
+///
+/// 用户明确要求过：问他某只股票时，第一件事是把 K 线面板打开并切到那只。
+/// 这件事不该靠模型想起来——它一忙就别过去了，或者干脆用虚拟屏去开同花顺。
+/// 所以放在工具里做：取数之前顺手切一下，面板和图同时准备好。
+///
+/// 只切「单标的」的调用：批量对比时来回切会把面板停在最后一只上，
+/// 反而看不到他最关心的那只。切不动（代码不规范、面板没挂载）就静默放过，
+/// 不能因为切面板失败而让取数也失败。
+Future<void> focusPanel(String symbol, {Object? period}) async {
+  try {
+    final code = sharedStockSource.normalize(symbol);
+    final want = '${period ?? ''}'.trim().toLowerCase();
+    const known = {'minute', 'day', 'week', 'month', 'm60', 'm30', 'm15', 'm5'};
+    final p = known.contains(want) ? want : null;
+    if (stockPanelRequest.currentSymbol == code && (p == null || stockPanelRequest.currentPeriod == p)) return;
+    await stockPanelRequest.show(code, period: p);
+  } catch (_) {
+    // 中文名、外汇之类交给工具自己报错；这里只负责把面板对上。
+  }
+}
+
 /// 构造股票工具集。
 ///
 /// [enabled] 为 false 时返回空列表，方便在设置里一键关掉。
@@ -247,6 +269,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
           final away = routeAway(symbol);
           if (away != null) return away;
+          // 用户要求：问个股第一件事就是把面板切到这只。
+          await focusPanel(symbol, period: args['period']);
           final pr = resolvePeriod(
             explicit: args['period'],
             panel: panelPeriod(),
@@ -368,6 +392,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
           final away = routeAway(symbol);
           if (away != null) return away;
+          // 用户要求：问个股第一件事就是把面板切到这只。
+          await focusPanel(symbol, period: args['period']);
           final pr = resolvePeriod(
             explicit: args['period'],
             panel: panelPeriod(),
@@ -397,6 +423,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
           final away = routeAway(symbol);
           if (away != null) return away;
+          // 用户要求：问个股第一件事就是把面板切到这只。
+          await focusPanel(symbol, period: args['period']);
           final q = await source.quote(symbol);
           return jsonEncode({
             'symbol': q.symbol,
@@ -461,6 +489,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           // 多级别对照只对接口覆盖的标的成立；混进外汇/黄金会让整次调用白跑。
           final unsupported = symbols.where((s) => !MarketRouter.decide(s).isApi).toList();
           if (unsupported.isNotEmpty) return routeAway(unsupported.first)!;
+          // 只分析一只时把面板切过去；多只对比不切，否则面板会停在他不看的那只上。
+          if (symbols.length == 1) await focusPanel(symbols.first);
 
           // 批量上限：再多会被接口限流，也超出模型一次能消化的量
           const maxSymbols = 8;
@@ -574,7 +604,9 @@ List<AppTool> buildStockTools({bool enabled = true}) {
         },
         required: ['symbol'],
       ),
-      promptHint: '切面板是为用户服务，不是每次回答都要切；只在你确实在讨论这只股票时用。',
+      promptHint:
+          '问个股时面板已经由 stock_kline / analyze_chan / stock_quote 自动切过去了，你不用为了对齐图表再调一次；'
+          '只有两种情况才需要它：用户明确说「别动面板」，或者你要让用户看一只你这次并不打算分析的股票。',
       execute: (args) async {
         try {
           final raw = '${args['symbol'] ?? ''}'.trim();
@@ -615,6 +647,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
           final away = routeAway(symbol);
           if (away != null) return away;
+          // 用户要求：问个股第一件事就是把面板切到这只。
+          await focusPanel(symbol, period: args['period']);
           final f = await source.fundamental(symbol);
           return jsonEncode({
             'summary': renderFundamental(f),
@@ -785,6 +819,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
           if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
           final away = routeAway(symbol);
           if (away != null) return away;
+          // 用户要求：问个股第一件事就是把面板切到这只。
+          await focusPanel(symbol, period: args['period']);
           final pr = resolvePeriod(
             explicit: args['period'],
             panel: panelPeriod(),
