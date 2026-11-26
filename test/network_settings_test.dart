@@ -258,9 +258,10 @@ void main() {
     }, _LoopbackHttpOverrides());
   });
 
-  test('the response timeout also ends a stream that stops producing data', () async {
+  test('the stream idle timeout ends a stream that stops producing data', () async {
     await HttpOverrides.runWithHttpOverrides(() async {
       final previousTimeout = NetConfig.responseTimeout;
+      final previousIdle = NetConfig.streamIdleTimeout;
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final received = Completer<void>();
       server.listen((request) async {
@@ -270,7 +271,9 @@ void main() {
         if (!received.isCompleted) received.complete();
         // Leave the response open so its body stalls until timeout.
       });
+      // 响应头已经到了，所以卡住流的是「流式静默超时」，不是响应超时。
       NetConfig.responseTimeout = const Duration(milliseconds: 100);
+      NetConfig.streamIdleTimeout = const Duration(milliseconds: 100);
       Net.reconfigure();
       try {
         final response = await Net.send('GET', Uri.parse('http://127.0.0.1:${server.port}/stalled-body'));
@@ -278,6 +281,36 @@ void main() {
         await expectLater(response.stream.bytesToString(), throwsA(isA<TimeoutException>()));
       } finally {
         NetConfig.responseTimeout = previousTimeout;
+        NetConfig.streamIdleTimeout = previousIdle;
+        Net.reconfigure();
+        await server.close(force: true);
+      }
+    }, _LoopbackHttpOverrides());
+  });
+
+  test('a stalled stream is not killed by the shorter response timeout', () async {
+    await HttpOverrides.runWithHttpOverrides(() async {
+      final previousTimeout = NetConfig.responseTimeout;
+      final previousIdle = NetConfig.streamIdleTimeout;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((request) async {
+        request.response.headers.contentType = ContentType.text;
+        request.response.write('first chunk');
+        await request.response.flush();
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+        request.response.write('second chunk');
+        await request.response.close();
+      });
+      NetConfig.responseTimeout = const Duration(milliseconds: 50);
+      NetConfig.streamIdleTimeout = const Duration(seconds: 5);
+      Net.reconfigure();
+      try {
+        final response = await Net.send('GET', Uri.parse('http://127.0.0.1:${server.port}/slow-chunks'));
+        // 深度思考模型就是这样：先吐一块，安静一会儿，再接着吐。
+        expect(await response.stream.bytesToString(), contains('second chunk'));
+      } finally {
+        NetConfig.responseTimeout = previousTimeout;
+        NetConfig.streamIdleTimeout = previousIdle;
         Net.reconfigure();
         await server.close(force: true);
       }
