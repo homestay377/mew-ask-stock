@@ -15,6 +15,7 @@ import '../core/keep_alive.dart';
 import '../core/paths.dart';
 import '../core/virtual_display_overlay_state.dart';
 import '../core/virtual_display_shot.dart';
+import '../stock/market_router.dart';
 import 'tool.dart';
 import 'mini_phone_channel.dart';
 import 'virtual_display_channel.dart';
@@ -789,6 +790,93 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
         final text = await readScreen();
         final note = changed ? '' : '（界面没有变化，可能已经在最外层页面）';
         return '已按 $key$note。\n\n$text';
+      },
+    ),
+    AppTool(
+      name: 'market_board',
+      displayName: '大势看板',
+      description:
+          '看整张市场表才能得出的结论：涨停家数、连板天梯、板块涨跌排序、成交额排名、涨跌分布、情绪温度。'
+          '这类数据接口只给一部分，主力口径在 App 里，所以它直接在虚拟屏打开「开盘啦」或「同花顺」并读屏。\n'
+          '取数三条路，按这个顺序选：① 面板画得出来的（A 股 / 指数 / ETF-LOF）用 stock_kline、analyze_chan、stock_levels；'
+          '② 面板画不出来的（外汇、伦敦金、港股、美股、期货）用 vd_open 打开同花顺；'
+          '③ 靠整张市场表才成立的用这个工具。',
+      parameters: objectSchema({
+        'view': strProp(
+          '看哪一块：limit_up 涨停 / ladder 连板天梯 / sector 板块 / rank 成交额排名 / breadth 涨跌分布 / index 指数概览',
+          enumValues: ['limit_up', 'ladder', 'sector', 'rank', 'breadth', 'index'],
+        ),
+        'app': strProp('可选：指定 App 名。不传按 view 自动选（天梯用开盘啦，其余用同花顺）'),
+      }),
+      promptHint: '大势结论要写清是「App 界面上读到的」还是「接口取的」，并带上读屏时间；不要把界面文字当成接口数据，也不要凭印象说今天普涨。',
+      execute: (args) async {
+        final view = '${args['view'] ?? ''}'.trim();
+        if (view.isEmpty) return '需要 view：limit_up / ladder / sector / rank / breadth / index。';
+        final explicit = '${args['app'] ?? ''}'.trim();
+        final wanted = explicit.isNotEmpty
+            ? explicit
+            : MarketRouter.appForTopic(view == 'ladder' || view == 'limit_up' ? 'limit_up' : view);
+
+        final off = await ensureReady();
+        if (off != null) return '虚拟屏没准备好。$off';
+
+        final resolve = await d.phone.findApp(wanted);
+        if (resolve['ok'] != true) {
+          return resolve['detail']?.toString() ?? '找不到叫「$wanted」的 App。';
+        }
+        final matches = (resolve['apps'] as List?) ?? const [];
+        if (matches.isEmpty) {
+          final installed = (resolve['suggest'] as List?) ?? const [];
+          if (installed.isNotEmpty) {
+            final names = installed.take(12).map((e) => '${(e as Map)['label']}(${e['package']})').join('、');
+            return '没找到「$wanted」。手机上相近的有：$names';
+          }
+          return '没找到「$wanted」。先 vd_apps 看看装了什么。';
+        }
+
+        final best = matches.first as Map;
+        final pkg = '${best['package']}';
+        final label = '${best['label']}';
+        final r = await d.vd.startApp(pkg);
+        if (r['ok'] != true) return '打开 $label 失败：${r['error'] ?? ''}'.trim();
+        VirtualDisplayOverlayState.show();
+        await KeepAlive.status('正在看 $label');
+
+        // 有些 App 会把页面拉到用户主屏，屏上没有任务就按任务号挪回来。
+        var hasTask = false;
+        for (var i = 0; i < 6; i++) {
+          final top = await d.vd.topTask();
+          final tid = (top['taskId'] as num?)?.toInt() ?? -1;
+          if (tid >= 0) {
+            hasTask = true;
+            break;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+        }
+        if (!hasTask) {
+          final cur = await d.vd.status();
+          final taskId = await d.vd.taskOfPackage(pkg);
+          if (taskId > 0 && taskId != cur.displayId) {
+            await d.vd.moveTask(taskId);
+            await Future<void>.delayed(const Duration(milliseconds: 350));
+          }
+        }
+
+        var text = await readScreen();
+        for (var i = 0; i < 3 && _screenSeemsEmpty(text); i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 800));
+          text = await readScreen();
+        }
+
+        final next = switch (view) {
+          'limit_up' => '要看连板高度就接着 vd_tap 点「涨停池」/「连板」标签，再 vd_observe。',
+          'ladder' => '天梯通常按 2 板 / 3 板 / 更高板分层，先 vd_observe 看当前停在第几层。',
+          'sector' => '板块页按涨跌幅排序；要看资金流就切到「资金」标签。',
+          'rank' => '成交额与换手排名在「排行」页，可能要先 vd_tap 选指标。',
+          'breadth' => '涨跌分布多在首页概览，读到的数字要带时间。',
+          _ => '指数概览在首页，读完再决定要不要点进板块。',
+        };
+        return '已打开 $label（$pkg）。\n\n$text\n\n下一步：$next';
       },
     ),
   ];

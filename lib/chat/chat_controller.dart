@@ -32,6 +32,21 @@ import '../tools/virtual_display_tools.dart';
 import '../tools/mcp.dart';
 import '../tools/stock_tools.dart';
 import '../tools/tool.dart';
+
+/// 取数类工具：多源降级 + 多周期并发，最坏耗时会明显超过 3 分钟。
+/// 与 `sub_agent_runner.dart` 的 `timeoutForTool` 保持同一口径，
+/// 否则主智能体这边会在 3 分钟把整轮掐掉，而子智能体那边还在正常跑。
+const kSlowDataTools = <String>{
+  'market_overview',
+  'stock_kline',
+  'analyze_chan',
+  'stock_quote',
+  'stock_levels',
+  'get_fundamental',
+  'scan_stocks',
+  'chart_annotate',
+  'http_request',
+};
 import '../tools/workspace_tools.dart';
 import 'accumulator.dart';
 import 'auto_compression.dart';
@@ -663,9 +678,16 @@ class ChatController extends ChangeNotifier {
         onUpdate(List.unmodifiable(acc.parts));
       }
       final current = acc.parts[idx] as ToolPart;
-      // 分派/讨论要等子智能体跑完，3 分钟明显不够；其余工具维持原来的上限。
+      // 分派/讨论要等子智能体跑完，3 分钟明显不够；股票取数是多源降级，
+      // 最坏 3 源 × 2 次 × 12 秒 = 72 秒/只，多周期或多只就会压线。
+      // 所以取数类给 8 分钟，与子智能体内部的 timeoutForTool 保持同一口径。
       final async = tool.name == 'dispatch_subagents' || tool.name == 'discuss_subagents';
-      final limit = async ? const Duration(minutes: 15) : const Duration(minutes: 3);
+      final slow = kSlowDataTools.contains(tool.name);
+      final limit = async
+          ? const Duration(minutes: 15)
+          : slow
+          ? const Duration(minutes: 8)
+          : const Duration(minutes: 3);
       // 子智能体的过程行写进 ToolPart.meta.progress：还在跑的时候界面就能看到它在干什么。
       final progress = <String>[];
       void pushProgress(String line) {
@@ -705,10 +727,14 @@ class ChatController extends ChangeNotifier {
       try {
         // 超时必须真的把任务停掉：`Future.timeout` 只是让 await 提前返回，
         // 底层团队照跑、token 照烧，用户看到「失败」但账单还在涨。
+        //
+        // 但**只有分派类**才联动取消整轮：其它工具超时如果也 cancel 全局令牌，
+        // 主循环下一句 `if (cancel.isCancelled) break` 就会跳出，模型再也不会被问一次，
+        // 屏幕上只剩一张工具卡片、没有正文也没有错误——用户看到的就是「没反应」。
         final out = await runWithToolContext(callCtx, () => tool.execute(current.inputJson)).timeout(
           limit,
           onTimeout: () {
-            callCtx.cancel.cancel();
+            if (async) callCtx.cancel.cancel();
             throw TimeoutException('工具执行超时（${limit.inMinutes} 分钟），已取消', limit);
           },
         );

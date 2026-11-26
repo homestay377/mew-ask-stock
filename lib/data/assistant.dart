@@ -308,7 +308,9 @@ class Assistant {
     this.useGlobalMemory = false,
     this.enableRecentChats = false,
     this.enableWebSearch = false,
-    this.enableStockTools = false,
+    // 股票分析是本 App 的主用途：新建助手默认带上。
+    // 老配置里显式写死的 false 不覆盖——用户关过就是关过。
+    this.enableStockTools = true,
     this.enablePhoneControl = false,
     this.enableVirtualDisplay = true,
     this.localTools = const {LocalTool.timeInfo},
@@ -464,7 +466,7 @@ class Assistant {
     useGlobalMemory: asBool(j['useGlobalMemory']),
     enableRecentChats: asBool(j['enableRecentChats']),
     enableWebSearch: asBool(j['enableWebSearch']),
-    enableStockTools: asBool(j['enableStockTools']),
+    enableStockTools: asBool(j['enableStockTools'], true),
     enablePhoneControl: asBool(j['enablePhoneControl']),
     enableVirtualDisplay: j['enableVirtualDisplay'] == null ? true : asBool(j['enableVirtualDisplay']),
     localTools: j['localTools'] == null ? {LocalTool.timeInfo} : enumSet(LocalTool.values, j['localTools']),

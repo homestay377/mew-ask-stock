@@ -19,6 +19,7 @@ import '../stock/stock_analyzer.dart';
 import '../stock/numbers.dart';
 import '../stock/period_resolver.dart';
 import '../stock/stock_fundamental.dart';
+import '../stock/market_router.dart';
 import '../stock/stock_source.dart';
 import 'tool.dart';
 
@@ -60,6 +61,26 @@ String? resolveSymbol(Object? raw) {
 String? panelPeriod() {
   final p = stockPanelRequest.currentPeriod;
   return (p == null || p.isEmpty) ? null : p;
+}
+
+/// 面板画不出来、接口也取不到的标的，别硬取。
+///
+/// 以前是三级降级跑满 72 秒（3 源 × 2 次 × 12 秒）再报「行情源都失败了」：
+/// 用户看到的是转圈，模型看到的是「取不到」。这里先分诊，
+/// 该走 App 的直接把路指出来，省一轮工具调用和一分钟等待。
+/// 返回 null 表示这是接口能覆盖的标的，继续正常取数。
+String? routeAway(String symbol) {
+  final d = MarketRouter.decide(symbol);
+  if (d.isApi) return null;
+  return jsonEncode({
+    'error': '${d.kind.label}「$symbol」不在本地行情接口的覆盖范围，K 线面板也画不出来。',
+    'route': 'app',
+    'app': d.app,
+    'reason': d.reason,
+    'next':
+        '用 vd_open 打开「${d.app}」，搜「$symbol」，再用 vd_observe 读界面文字；'
+        '这类品种不做缠论与多周期计算，也不要把界面上读到的数字说成接口取的。',
+  });
 }
 
 /// 构造股票工具集。
@@ -224,6 +245,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
         try {
           final symbol = resolveSymbol(args['symbol']);
           if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
+          final away = routeAway(symbol);
+          if (away != null) return away;
           final pr = resolvePeriod(
             explicit: args['period'],
             panel: panelPeriod(),
@@ -343,6 +366,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
         try {
           final symbol = resolveSymbol(args['symbol']);
           if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
+          final away = routeAway(symbol);
+          if (away != null) return away;
           final pr = resolvePeriod(
             explicit: args['period'],
             panel: panelPeriod(),
@@ -370,6 +395,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
         try {
           final symbol = resolveSymbol(args['symbol']);
           if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
+          final away = routeAway(symbol);
+          if (away != null) return away;
           final q = await source.quote(symbol);
           return jsonEncode({
             'symbol': q.symbol,
@@ -431,6 +458,9 @@ List<AppTool> buildStockTools({bool enabled = true}) {
 
           final symbols = rawSymbols.split(RegExp(r'[,，\s]+')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
           if (symbols.isEmpty) return jsonEncode({'error': 'symbols 解析后为空'});
+          // 多级别对照只对接口覆盖的标的成立；混进外汇/黄金会让整次调用白跑。
+          final unsupported = symbols.where((s) => !MarketRouter.decide(s).isApi).toList();
+          if (unsupported.isNotEmpty) return routeAway(unsupported.first)!;
 
           // 批量上限：再多会被接口限流，也超出模型一次能消化的量
           const maxSymbols = 8;
@@ -583,6 +613,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
         try {
           final symbol = resolveSymbol(args['symbol']);
           if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
+          final away = routeAway(symbol);
+          if (away != null) return away;
           final f = await source.fundamental(symbol);
           return jsonEncode({
             'summary': renderFundamental(f),
@@ -659,6 +691,9 @@ List<AppTool> buildStockTools({bool enabled = true}) {
               .toSet()
               .take(20)
               .toList();
+          // 扫描是 A 股内部的事：混进外汇/黄金只会让 20 只全报「取数失败」。
+          final unsupported = symbols.where((s) => !MarketRouter.decide(s).isApi).toList();
+          if (unsupported.isNotEmpty) return routeAway(unsupported.first)!;
           final period = '${args['period'] ?? 'day'}';
 
           final az = await analyzer();
@@ -748,6 +783,8 @@ List<AppTool> buildStockTools({bool enabled = true}) {
         try {
           final symbol = resolveSymbol(args['symbol']);
           if (symbol == null) return jsonEncode({'error': '缺少 symbol，且面板没有正在看的股票'});
+          final away = routeAway(symbol);
+          if (away != null) return away;
           final pr = resolvePeriod(
             explicit: args['period'],
             panel: panelPeriod(),
