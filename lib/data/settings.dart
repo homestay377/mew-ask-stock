@@ -450,6 +450,15 @@ class AppSettings {
     if (j['vdAutoOn'] != true) {
       assistants = [for (final a in assistants) a.enableVirtualDisplay ? a : a.copyWith(enableVirtualDisplay: true)];
     }
+    // 一次性迁移：MewBot 是开箱默认助手，建的时候根本没写 enableStockTools，
+    // 落盘就成了 false —— 于是工具集里一个股票工具都没有，模型说「打开 K 线面板」
+    // 只能去虚拟屏里开同花顺。只动 MewBot 一个助手，只动一次。
+    if (j['stockAutoOn'] != true) {
+      assistants = [
+        for (final a in assistants)
+          if (a.id == defaultAssistantId && !a.enableStockTools) a.copyWith(enableStockTools: true) else a,
+      ];
+    }
     final loadedAssistants = assistants.isEmpty ? defaultAssistants() : assistants;
     var list = [
       for (final assistant in loadedAssistants)
@@ -533,6 +542,7 @@ class AppSettings {
     'assistants': assistants.map((e) => e.toJson()).toList(),
     // 标记「虚拟屏工具已按新默认打开过」，迁移只做一次
     'vdAutoOn': true,
+    'stockAutoOn': true,
     'currentAssistantId': currentAssistantId,
     'chatModelId': chatModelId,
     'titleModelId': titleModelId,

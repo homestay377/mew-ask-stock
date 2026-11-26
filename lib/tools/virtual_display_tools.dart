@@ -334,6 +334,9 @@ List<AppTool> buildVirtualDisplayTools({bool enabled = true, VirtualDisplayDeps?
       parameters: objectSchema({'app': strProp('App 名字或包名，例如 同花顺 / 雪球 / com.xueqiu.android')}, required: ['app']),
       promptHint:
           '这块虚拟屏没有系统导航栏（不显示手势条/三大金刚），回上一页一律用 vd_back，别去找按钮。'
+          '⚠ 用户说「K 线面板」「看盘面板」「打开图表」时，指的是这个 App **自带的**图表，不是你正在操作的虚拟屏：'
+          '那是 stock_panel_show / chart_context 的活，绝对不要因为找不到就用 vd_open 去开同花顺找图。'
+          '这些工具不在工具列表里，说明助手设置里的「股票分析」没打开——直接让用户去开，不要自己找 App 顶替。'
           '需要看接口拿不到的行情（行业资金流、龙虎榜席位、F10 里没 API 的字段）时，'
           '用 vd_open 打开对应 App 读界面；能走 stock_kline / analyze_chan / stock_levels 的，优先走它们，不要开 App。',
       execute: (args) async {
