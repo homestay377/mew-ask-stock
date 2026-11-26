@@ -101,9 +101,14 @@ void main() {
     });
 
     test('手机操控与股票分析互相独立', () {
-      final a = Assistant(id: 'x', name: 'x').copyWith(enablePhoneControl: true);
+      // 开手机操控不会顺带开股票分析。
+      final a = Assistant(id: 'x', name: 'x').copyWith(enablePhoneControl: true, enableStockTools: false);
       expect(a.enableStockTools, isFalse);
       expect(a.copyWith(enableStockTools: true).enablePhoneControl, isTrue);
+      // 反过来也一样：新建助手默认带股票分析，但手机操控仍是关的。
+      final fresh = Assistant(id: 'y', name: 'y');
+      expect(fresh.enableStockTools, isTrue);
+      expect(fresh.enablePhoneControl, isFalse);
     });
   });
 }
