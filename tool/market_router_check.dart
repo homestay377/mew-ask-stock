@@ -42,6 +42,12 @@ void main() {
   _expectApi('sz399006', MarketKind.indexQuote);
   _expectApi('510300', MarketKind.fund);
   _expectApi('159915', MarketKind.fund);
+  // 可转债：接口有数据（113052/123107/127056 都是最新一根），放行交给新鲜度检查
+  _expectApi('sh113052', MarketKind.aShare);
+  _expectApi('123107', MarketKind.aShare);
+  // 北交所：腾讯 day 恒空，降级到新浪只拿到停更序列，直接走 App
+  _expectApp('bj430047', MarketKind.aShare);
+  _expectApp('830799', MarketKind.aShare);
   _expectApi('上证指数', MarketKind.indexQuote);
   _expectApi('阳光电源', MarketKind.unknown);
   _expectApi('贵州茅台', MarketKind.unknown);

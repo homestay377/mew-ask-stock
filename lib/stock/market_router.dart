@@ -168,11 +168,47 @@ class MarketRouter {
       return MarketDecision(MarketRoute.api, MarketKind.indexQuote, code: code, reason: '指数：腾讯/新浪/东财都有，面板能画。');
     }
     final six = code.substring(2);
+    if (isBeijingCode(six)) {
+      return MarketDecision(
+        MarketRoute.app,
+        MarketKind.aShare,
+        code: code,
+        app: appStock,
+        reason: '北交所：腾讯 day 实测恒为空，降级只能拿到一段不再更新的新浪不复权序列，画出来的结构是假的。',
+      );
+    }
+    // 可转债接口是有数据的（113052 / 123107 / 127056 都是最新一根），
+    // 但已摘牌的会停在停牌日，所以这里放行、由新鲜度检查兜底。
+    if (isBondCode(six)) {
+      return MarketDecision(
+        MarketRoute.api,
+        MarketKind.aShare,
+        code: code,
+        reason: '可转债：接口有 K 线。若最后一根明显滞后（已摘牌），会由新鲜度检查报出来。',
+      );
+    }
     if (isFundCode(six)) {
       return MarketDecision(MarketRoute.api, MarketKind.fund, code: code, reason: 'ETF/LOF：接口有行情，面板能画。');
     }
     return MarketDecision(MarketRoute.api, MarketKind.aShare, code: code, reason: 'A 股：面板能画，走接口。');
   }
+
+  /// 可转债：沪 110/111/113/118/132，深 123/127/128。
+  /// 这些代码接口是有 K 线的，但已摘牌的债最后一根会停在停牌那天（实测
+  /// sh110059 停在 2025-10-22），单看代码分诊不出来，只能靠数据新鲜度兜。
+  static bool isBondCode(String six) =>
+      six.startsWith('110') ||
+      six.startsWith('111') ||
+      six.startsWith('113') ||
+      six.startsWith('118') ||
+      six.startsWith('123') ||
+      six.startsWith('127') ||
+      six.startsWith('128') ||
+      six.startsWith('132');
+
+  /// 北交所：实测腾讯 day 恒为空数组（bj430047 / bj830799 / bj832000 全空），
+  /// 三级降级只会在新浪上拿到一段不再更新的不复权序列，画出来的结构是假的。
+  static bool isBeijingCode(String six) => six.startsWith('4') || six.startsWith('8');
 
   /// 场内基金：沪 50/51/56/58，深 15/16/18。
   static bool isFundCode(String six) =>

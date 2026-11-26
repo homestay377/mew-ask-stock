@@ -189,6 +189,21 @@ KlineQuality assessBars(List<Bar> bars, String period) {
   if (badVolume > 0) issues.add('有 $badVolume 根成交量为负或无效');
   if (bars.length < 30) issues.add('只有 ${bars.length} 根 K 线，样本过少，结构判断不可靠');
 
+  // 最后一根离现在多远：这一条改的是「结论」而不是「数据本身」。
+  // 实测可转债摘牌后接口仍返回历史序列（sh110059 停在 2025-10-22），
+  // 北交所降级到新浪也可能停在几百天前——不报出来，模型会把两年前的
+  // 中枢当成今天的结构讲给用户听。
+  final lastT = parseBarTime(bars.last.t);
+  if (lastT != null) {
+    final staleDays = DateTime.now().difference(lastT).inDays;
+    if (staleDays >= 30) {
+      issues.add(
+        '最后一根是 ${lastT.year}-${_two(lastT.month)}-${_two(lastT.day)} 的，已经 $staleDays 天没有新数据，'
+        '这只标的可能已停牌或摘牌：结构只代表当时，不能当成现在的走势讲',
+      );
+    }
+  }
+
   return KlineQuality(
     duplicateDates: duplicate,
     outOfOrder: outOfOrder,
@@ -278,6 +293,8 @@ BarClock barClock(String period, String lastBar) {
   // 日线原始值是 00:00，直接给人看会被误读成「凌晨更新的」。
   return BarClock(lastBar: lastBar, barTime: endAt, closed: closed, age: age, note: note);
 }
+
+String _two(int v) => v < 10 ? '0$v' : '$v';
 
 /// 「35 分钟前」这种给人看的时间差。
 String humanAge(Duration d) {
