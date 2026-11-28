@@ -116,7 +116,14 @@ class StockAnalyzer {
     final series = useCache
         ? await source.klineCached(symbol, period: period, count: count)
         : await source.kline(symbol, period: period, count: count);
-    final chan = analyzeShared(series.bars, formula, viewStart: viewStart, symbol: series.symbol, name: series.name);
+    final chan = analyzeShared(
+      series.bars,
+      formula,
+      period: period,
+      viewStart: viewStart,
+      symbol: series.symbol,
+      name: series.name,
+    );
     sw.stop();
     return StockAnalysis(
       series: series,

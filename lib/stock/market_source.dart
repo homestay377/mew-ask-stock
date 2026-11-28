@@ -183,8 +183,10 @@ class MarketSource {
           items.add({
             'code': asStr(m['c']),
             'name': asStr(m['n']),
-            // p 是「分」，除以 100 才是元
-            'price': _d(m['p']) == null ? null : (_d(m['p'])! / 100),
+            // ★ p 的单位是「厘」（0.001 元），不是分。实测 2026-11-27 涨停池：
+            //   常山北明 p=15270 → 15.27、鹿山新材 p=23960 → 23.96。
+            //   原来按「分」除以 100，价格整体大了 10 倍。
+            'price': _d(m['p']) == null ? null : r2(_d(m['p'])! / 1000),
             'change_pct': _d(m['zdp']),
             // lbc = 连板数
             'boards': m['lbc'] is num ? (m['lbc'] as num).toInt() : null,
@@ -242,20 +244,35 @@ class MarketSource {
   Future<({List<Map<String, dynamic>> items, String? error})> billboard({int limit = 15}) async {
     final url = Uri.parse(
       'https://datacenter-web.eastmoney.com/api/data/v1/get'
+      // ★ 必须先按日期取「最近一天」，再按净买入排序。
+      //   以前直接 sortColumns=BILLBOARD_NET_AMT，取到的是**历史上所有龙虎榜里
+      //   净买入最大的 15 条**——实测第一条是 2015-07-07 的民生银行。
+      //   于是「招商银行 +9.57%」这种十年前的记录被当成今天的行情，能把涨跌说反。
       '?reportName=RPT_DAILYBILLBOARD_DETAILSNEW&columns=ALL&source=WEB&client=WEB'
-      '&pageNumber=1&pageSize=$limit&sortColumns=BILLBOARD_NET_AMT&sortTypes=-1',
+      '&pageNumber=1&pageSize=${limit * 8 > 200 ? 200 : limit * 8}'
+      '&sortColumns=TRADE_DATE,BILLBOARD_NET_AMT&sortTypes=-1,-1',
     );
     try {
       final j = tryJsonDecode(await _get(url, headers: _Em.referer('https://data.eastmoney.com/stock/lhb.html')));
       final result = (j is Map) ? asMapOrNull(asMap(j)['result']) : null;
       final data = result?['data'];
       if (data is! List || data.isEmpty) return (items: const <Map<String, dynamic>>[], error: '返回为空');
+      // 只保留最新交易日的记录：接口一次返回多个日期，混在一起就没法当榜单读。
       String? date;
+      for (final e in data) {
+        if (e is! Map) continue;
+        final d0 = asStr(asMap(e)['TRADE_DATE']).split(' ').first;
+        if (d0.isNotEmpty) {
+          date = d0;
+          break;
+        }
+      }
       final out = <Map<String, dynamic>>[];
       for (final e in data) {
         if (e is! Map) continue;
         final m = asMap(e);
-        date ??= asStr(m['TRADE_DATE']).split(' ').first;
+        if (date != null && asStr(m['TRADE_DATE']).split(' ').first != date) continue;
+        if (out.length >= limit) break;
         out.add({
           'code': asStr(m['SECURITY_CODE']),
           'name': asStr(m['SECURITY_NAME_ABBR']),
@@ -351,7 +368,7 @@ class MarketSource {
     final n = DateTime.now();
     final hh = n.hour.toString().padLeft(2, '0');
     final mm = n.minute.toString().padLeft(2, '0');
-    return '${n.year}-${n.month.toString().padLeft(2, '0')}-${n.day.toString().padLeft(2, '0')} $hh:$mm（实时取数，盘中会变）';
+    return '${n.year}-${n.month.toString().padLeft(2, '0')}-${n.day.toString().padLeft(2, '0')} $hh:$mm（取数时刻，不是行情时间：行情以条目里的 time/date 为准）';
   }
 
   static String _stripMarket(String s) {

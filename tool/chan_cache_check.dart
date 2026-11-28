@@ -30,11 +30,17 @@ void main() {
   _check(identical(a, b), '同一批数据第二次应命中缓存（返回同一个对象）');
   _check(chanCacheSize == 1, '缓存条目应为 1，实际 $chanCacheSize');
 
+  // 周期不同不能互相命中（日线 vs 周线同 symbol 同根数同日期）
+  final dayR = analyzeShared(bars, formula, period: 'day', symbol: 'sz300274');
+  final weekR = analyzeShared(bars, formula, period: 'week', symbol: 'sz300274');
+  _check(!identical(dayR, weekR), '日线与周线不能命中同一条缓存');
+
   // 最后一根变了 = 新 K 线到了，必须重算
   final next = _bars(60, last: '2026-11-27');
   final c = analyzeShared(next, formula, symbol: 'sz300274');
   _check(!identical(a, c), '最后一根时间变了应重算');
-  _check(chanCacheSize == 2, '缓存条目应为 2，实际 $chanCacheSize');
+  // 多了日线、周线两条：它们和前面 period 默认值的那条不共享键
+  _check(chanCacheSize == 4, '缓存条目应为 4，实际 $chanCacheSize');
 
   // 公式变了也必须重算
   final d = analyzeShared(next, 'B:=MA(C,10);', symbol: 'sz300274');

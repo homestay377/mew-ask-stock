@@ -41,6 +41,10 @@ String _formulaKey(String formula) {
 ChanResult analyzeShared(
   List<Bar> bars,
   String formula, {
+
+  /// ★ 周期必须进键：日线和周线可能都是 640 根、最后一根都是同一天，
+  /// 不写周期就会互相命中——表现是「周线结论和日线逐位相同」。
+  String period = '',
   int load = 0,
   int viewStart = 0,
   String? symbol,
@@ -52,6 +56,7 @@ ChanResult analyzeShared(
 
   final key = [
     symbol ?? '',
+    period,
     bars.length,
     // 原始时间戳比任何格式化都稳：最后一根变了（新 K 线到）键就变。
     bars.last.t,

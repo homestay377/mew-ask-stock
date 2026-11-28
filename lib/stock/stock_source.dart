@@ -547,6 +547,10 @@ class StockSource {
       final l = _d(r[4]);
       final v = r.length > 5 ? _d(r[5]) : 0.0;
       if (o == null || c == null || h == null || l == null) continue;
+      // ★ 前复权会把早期价格算成负数：实测 sh600036 周线 2014-05-30 是 -6.051
+      //   （累计分红超过当时股价）。负价格上算出来的笔和中枢没有意义，
+      //   而且 assessBars 会把它报成「OHLC 不自洽」。直接丢掉这一段。
+      if (o <= 0 || c <= 0 || h <= 0 || l <= 0) continue;
       bars.add(Bar(o, h, l, c, v: v ?? 0, t: t));
     }
     if (bars.isEmpty) throw StockDataError('$code 的 K 线解析后为空');

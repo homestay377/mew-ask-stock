@@ -430,7 +430,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
         if (!mounted || _lastKey != key) return;
         // 走共享缓存：和 analyze_chan 用的是同一份结果，
         // 避免「图上画的中枢」和「模型说的中枢」是两次独立计算。
-        ch = analyzeShared(s.bars, formula, symbol: s.symbol, name: s.name);
+        ch = analyzeShared(s.bars, formula, period: s.period, symbol: s.symbol, name: s.name);
       }
       if (!mounted || _lastKey != key) return;
       _viewport.reset(s.bars.length);
@@ -469,7 +469,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
     if (_chan == null) {
       _formula().then((f) {
         if (!mounted) return;
-        setState(() => _chan = analyzeShared(s.bars, f, symbol: s.symbol, name: s.name));
+        setState(() => _chan = analyzeShared(s.bars, f, period: s.period, symbol: s.symbol, name: s.name));
       });
     }
   }
@@ -545,7 +545,7 @@ class _StockChartPanelState extends State<StockChartPanel> {
     if (!mounted || _lastKey != key) return;
     ChanResult? ch;
     if (widget.state.showChan) {
-      ch = analyzeShared(fresh.bars, await _formula(), symbol: fresh.symbol, name: fresh.name);
+      ch = analyzeShared(fresh.bars, await _formula(), period: fresh.period, symbol: fresh.symbol, name: fresh.name);
     }
     if (!mounted || _lastKey != key) return;
     setState(() {

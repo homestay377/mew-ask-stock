@@ -24,6 +24,15 @@ void main() {
     expect(chanCacheSize, 1);
   });
 
+  test('日线和周线不会互相命中——周期必须进键', () {
+    // 同一批 bars、同一个 symbol、同一个最后一根日期，只有周期不同。
+    // 实测事故：600036 的周线结论与日线逐位相同，就是这里漏了 period。
+    final bars = _bars(60);
+    final day = analyzeShared(bars, formula, period: 'day', symbol: 'sz300274');
+    final week = analyzeShared(bars, formula, period: 'week', symbol: 'sz300274');
+    expect(identical(day, week), isFalse);
+  });
+
   test('新 K 线（最后一根时间变了）会失效重算', () {
     final a = analyzeShared(_bars(60), formula, symbol: 'sz300274');
     final b = analyzeShared(_bars(60, last: '2026-11-27'), formula, symbol: 'sz300274');
