@@ -186,7 +186,7 @@ class MarketSource {
             // ★ p 的单位是「厘」（0.001 元），不是分。实测 2026-11-27 涨停池：
             //   常山北明 p=15270 → 15.27、鹿山新材 p=23960 → 23.96。
             //   原来按「分」除以 100，价格整体大了 10 倍。
-            'price': _d(m['p']) == null ? null : r2(_d(m['p'])! / 1000),
+            'price': _d(m['p']) == null ? null : _d(m['p'])! / 1000,
             'change_pct': _d(m['zdp']),
             // lbc = 连板数
             'boards': m['lbc'] is num ? (m['lbc'] as num).toInt() : null,
